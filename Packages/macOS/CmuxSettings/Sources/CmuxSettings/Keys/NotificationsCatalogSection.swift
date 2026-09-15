@@ -8,6 +8,13 @@ public struct NotificationsCatalogSection: SettingCatalogSection {
         userDefaultsKey: "notificationDockBadgeEnabled"
     )
 
+    /// Whether the title-bar bell shows an unread notification badge.
+    public let showTitlebarBadge = DefaultsKey<Bool>(
+        id: "notifications.showTitlebarBadge",
+        defaultValue: true,
+        userDefaultsKey: "notificationTitlebarBadgeEnabled"
+    )
+
     public let showInMenuBar = DefaultsKey<Bool>(
         id: "notifications.showInMenuBar",
         defaultValue: true,

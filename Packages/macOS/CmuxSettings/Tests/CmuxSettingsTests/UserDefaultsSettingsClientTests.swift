@@ -20,6 +20,7 @@ struct UserDefaultsSettingsClientTests {
         let catalog = SettingCatalog()
 
         #expect(client.value(for: catalog.app.reorderOnNotification) == true)
+        #expect(client.value(for: catalog.notifications.showTitlebarBadge) == true)
         #expect(client.value(for: catalog.sidebar.hideAllDetails) == false)
         #expect(client.value(for: catalog.sidebar.showWorkspaceDescription) == true)
         #expect(client.value(for: catalog.sidebar.showNotificationMessage) == true)
@@ -78,6 +79,10 @@ struct UserDefaultsSettingsClientTests {
         client.set(24, for: catalog.sidebar.notificationMessageLineLimit)
         #expect(defaults.object(forKey: "sidebarNotificationMessageLineLimit") as? Int == 24)
         #expect(client.value(for: catalog.sidebar.notificationMessageLineLimit) == 24)
+
+        client.set(false, for: catalog.notifications.showTitlebarBadge)
+        #expect(defaults.object(forKey: "notificationTitlebarBadgeEnabled") as? Bool == false)
+        #expect(client.value(for: catalog.notifications.showTitlebarBadge) == false)
     }
 
     @Test func resetRestoresDefault() throws {

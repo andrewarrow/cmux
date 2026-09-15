@@ -904,6 +904,11 @@
           "default": true,
           "description": "Show the unread count in the Dock tile."
         },
+        "showTitlebarBadge": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show the unread notification badge on the title-bar bell."
+        },
         "showInMenuBar": {
           "type": "boolean",
           "default": true,

@@ -985,11 +985,12 @@ private final class TitlebarControlRightClickNSView: NSView {
 private struct TitlebarNotificationBadge: View {
     let unreadModel: SidebarUnreadModel
     let config: TitlebarControlsStyleConfig
+    let isVisible: Bool
     @Environment(\.cmuxGlobalFontMagnificationPercent) private var globalFontPercent
 
     var body: some View {
         let unreadCount = unreadModel.totalUnreadCount
-        if unreadCount > 0 {
+        if isVisible && unreadCount > 0 {
             Text("\(min(unreadCount, 99))")
                 .cmuxFont(
                     size: titlebarNotificationBadgeFontSize(for: config)
@@ -1024,6 +1025,7 @@ struct TitlebarControlsView: View {
     private let titlebarShortcutHintYOffset = ShortcutHintDebugSettings.defaultTitlebarHintY
     private let alwaysShowShortcutHints = ShortcutHintDebugSettings().alwaysShowHints
     @LiveSetting(\.shortcuts.showModifierHoldHints) private var showModifierHoldHints
+    @LiveSetting(\.notifications.showTitlebarBadge) private var showTitlebarBadge
 
     private struct TitlebarHintLayoutItem: Identifiable {
         let action: KeyboardShortcutSettings.Action
@@ -1169,7 +1171,11 @@ struct TitlebarControlsView: View {
                         iconGeometryKeyPrefix: "titlebarControl_showNotificationsIcon"
                     )
 
-                    TitlebarNotificationBadge(unreadModel: unreadModel, config: config)
+                    TitlebarNotificationBadge(
+                        unreadModel: unreadModel,
+                        config: config,
+                        isVisible: showTitlebarBadge
+                    )
                 }
                 .frame(width: config.buttonSize, height: config.buttonSize)
             }

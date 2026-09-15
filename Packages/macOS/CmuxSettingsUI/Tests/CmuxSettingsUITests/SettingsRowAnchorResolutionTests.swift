@@ -96,6 +96,7 @@ struct SettingsRowAnchorResolutionTests {
         "notifications.agentTurnComplete",
         "notifications.command",
         "notifications.dockBadge",
+        "notifications.showTitlebarBadge",
         "notifications.paneFlash",
         "notifications.paneFlashColor",
         "notifications.showInMenuBar",

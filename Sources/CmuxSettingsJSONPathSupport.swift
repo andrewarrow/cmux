@@ -187,6 +187,10 @@ enum NotificationSettingsFileMapping {
 
     static let booleanSettings: [SettingsFileBooleanMapping] = [
         .init(jsonKey: "dockBadge", defaultsKey: NotificationBadgeSettings.dockBadgeEnabledKey),
+        .init(
+            jsonKey: "showTitlebarBadge",
+            defaultsKey: NotificationsCatalogSection().showTitlebarBadge.userDefaultsKey
+        ),
         .init(jsonKey: "showInMenuBar", defaultsKey: MenuBarExtraSettings.showInMenuBarKey),
         .init(jsonKey: "unreadPaneRing", defaultsKey: NotificationPaneRingSettings.enabledKey),
         .init(jsonKey: "paneFlash", defaultsKey: NotificationPaneFlashSettings.enabledKey),

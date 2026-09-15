@@ -80,6 +80,25 @@ final class CommandPaletteSettingsToggleTests: XCTestCase {
         }
     }
 
+    func testTitlebarNotificationBadgeCommandTogglesSetting() throws {
+        try withTemporaryDefaults { defaults in
+            let descriptor = try XCTUnwrap(
+                CommandPaletteSettingsToggleCommands.descriptor(
+                    commandId: "palette.toggleSetting.showTitlebarBadge"
+                )
+            )
+
+            XCTAssertTrue(descriptor.isOn(defaults))
+            descriptor.toggle(defaults: defaults, notificationCenter: NotificationCenter())
+
+            XCTAssertEqual(
+                defaults.object(forKey: NotificationsCatalogSection().showTitlebarBadge.userDefaultsKey) as? Bool,
+                false
+            )
+            XCTAssertFalse(descriptor.isOn(defaults))
+        }
+    }
+
     func testInterceptTerminalOpenCommandReadsRawSettingWhenBrowserIsDisabled() throws {
         try withTemporaryDefaults { defaults in
             let descriptor = try XCTUnwrap(

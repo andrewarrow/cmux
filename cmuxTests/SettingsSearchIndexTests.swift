@@ -14,6 +14,7 @@ struct SettingsSearchIndexTests {
         assertSearch("vscode", contains: SettingsSearchIndex.settingID(for: .app, idSuffix: "preferred-editor"))
         assertSearch("cmd q", contains: SettingsSearchIndex.settingID(for: .app, idSuffix: "warn-before-quit"))
         assertSearch("sound file", contains: SettingsSearchIndex.settingID(for: .app, idSuffix: "notification-sound"))
+        assertSearch("titlebar bell badge", contains: SettingsSearchIndex.settingID(for: .app, idSuffix: "titlebar-notification-badge"))
         assertSearch("disable browser", contains: SettingsSearchIndex.settingID(for: .browser, idSuffix: "enable-browser"))
         assertSearch("default browser zoom", contains: SettingsSearchIndex.settingID(for: .browser, idSuffix: "default-zoom-level"))
         assertSearch("http allowlist", contains: SettingsSearchIndex.settingID(for: .browser, idSuffix: "http-allowlist"))
@@ -125,6 +126,13 @@ struct SettingsSearchIndexTests {
         #expect(
             SettingsSearchIndex.anchorID(forSettingsPath: "sidebar.makePullRequestsClickable")
                 == SettingsSearchIndex.settingID(for: .sidebarAppearance, idSuffix: "make-pr-clickable")
+        )
+    }
+
+    @Test func settingsPathAnchorIncludesTitlebarNotificationBadge() {
+        #expect(
+            SettingsSearchIndex.anchorID(forSettingsPath: "notifications.showTitlebarBadge")
+                == SettingsSearchIndex.settingID(for: .app, idSuffix: "titlebar-notification-badge")
         )
     }
 

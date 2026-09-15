@@ -44,6 +44,7 @@ Notification behavior from Settings > Notifications.
 | Key | Type | Default | Description |
 |---|---|---|---|
 | `notifications.dockBadge` | boolean | `true` | Show the unread count in the Dock tile. |
+| `notifications.showTitlebarBadge` | boolean | `true` | Show the unread notification badge on the title-bar bell. |
 | `notifications.showInMenuBar` | boolean | `true` | Show the menu bar extra. |
 | `notifications.unreadPaneRing` | boolean | `true` | Highlight panes with unread notifications. |
 | `notifications.paneFlash` | boolean | `true` | Flash the focused pane when requested. |

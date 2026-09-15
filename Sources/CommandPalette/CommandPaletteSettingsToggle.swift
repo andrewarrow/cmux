@@ -342,6 +342,17 @@ enum CommandPaletteSettingsToggleCommands {
                 defaultsKey: NotificationBadgeSettings.dockBadgeEnabledKey
             ),
             CommandPaletteSettingToggleDescriptor(
+                commandId: commandIdPrefix + "showTitlebarBadge",
+                settingsKey: "notifications.showTitlebarBadge",
+                title: {
+                    String(localized: "settings.notifications.showTitlebarBadge", defaultValue: "Show Title-Bar Notification Badge")
+                },
+                sectionTitle: app,
+                keywords: ["notifications.showTitlebarBadge", "titlebar", "bell", "badge", "notification", "unread", "count"],
+                defaultValue: NotificationsCatalogSection().showTitlebarBadge.defaultValue,
+                defaultsKey: NotificationsCatalogSection().showTitlebarBadge.userDefaultsKey
+            ),
+            CommandPaletteSettingToggleDescriptor(
                 commandId: commandIdPrefix + "showInMenuBar",
                 settingsKey: "notifications.showInMenuBar",
                 title: {
