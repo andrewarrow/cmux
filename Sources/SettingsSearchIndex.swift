@@ -45,7 +45,15 @@ enum SettingsSearchIndex {
         setting(.app, "imessage-mode", String(localized: "settings.app.iMessageMode", defaultValue: "iMessage Mode"), "message messages imessage chat prompt prompts submitted message send agent workspace reorder move top"),
         setting(.app, "reorder-notification", String(localized: "settings.app.reorderOnNotification", defaultValue: "Reorder on Notification"), "workspace notification order"),
         setting(.app, "dock-badge", String(localized: "settings.app.dockBadge", defaultValue: "Dock Badge"), "unread count app icon"),
-        setting(.app, "titlebar-notification-badge", String(localized: "settings.notifications.showTitlebarBadge", defaultValue: "Show Title-Bar Notification Badge"), "notifications.showTitlebarBadge titlebar bell badge unread count"),
+        setting(
+            .app,
+            "titlebar-notification-badge",
+            String(localized: "settings.notifications.showTitlebarBadge", defaultValue: "Show Title-Bar Notification Badge"),
+            String(
+                localized: "settings.search.alias.setting.app.titlebar-notification-badge",
+                defaultValue: "notifications.showTitlebarBadge titlebar title bar bell badge notification unread count red dot"
+            )
+        ),
         setting(.app, "menu-bar-only", String(localized: "settings.app.menuBarOnly", defaultValue: "Menu Bar Only"), "dock icon cmd tab"),
         setting(.app, "show-menu-bar", String(localized: "settings.app.showInMenuBar", defaultValue: "Show in Menu Bar"), "menu extra status item"),
         setting(.app, "unread-pane-ring", String(localized: "settings.notifications.paneRing.title", defaultValue: "Unread Pane Ring"), "notification blue ring pane"),

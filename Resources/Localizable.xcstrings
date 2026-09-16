@@ -351146,6 +351146,65 @@
         }
       }
     },
+    "settings.search.alias.setting.app.titlebar-notification-badge": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "notifications.showTitlebarBadge titlebar title bar bell badge notification unread count red dot"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "notifications.showTitlebarBadge titlebar title bar bell badge notification unread count red dot titelleiste titel glocke benachrichtigung ungelesen anzahl roter punkt"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "notifications.showTitlebarBadge titlebar title bar bell badge notification unread count red dot barre de titre cloche notification non lu nombre point rouge"
+          }
+        },
+        "ar": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "notifications.showTitlebarBadge titlebar title bar bell badge notification unread count red dot شريط العنوان جرس شارة إشعار غير مقروء عدد نقطة حمراء"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "notifications.showTitlebarBadge titlebar title bar bell badge notification unread count red dot barra de título campana insignia notificación no leído recuento punto rojo"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "notifications.showTitlebarBadge titlebar title bar bell badge notification unread count red dot 標題列 鈴鐺 標記 通知 未讀 數量 紅點"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "notifications.showTitlebarBadge titlebar title bar bell badge notification unread count red dot 标题栏 铃铛 标记 通知 未读 数量 红点"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "notifications.showTitlebarBadge titlebar title bar bell badge notification unread count red dot 제목 표시줄 벨 배지 알림 읽지 않음 개수 빨간 점"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "notifications.showTitlebarBadge titlebar title bar bell badge notification unread count red dot タイトルバー ベル バッジ 通知 未読 件数 赤い点"
+          }
+        }
+      }
+    },
     "settings.search.alias.setting.app.file-editor-word-wrap": {
       "extractionState": "manual",
       "localizations": {

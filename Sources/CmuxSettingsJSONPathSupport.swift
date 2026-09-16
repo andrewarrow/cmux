@@ -189,7 +189,7 @@ enum NotificationSettingsFileMapping {
         .init(jsonKey: "dockBadge", defaultsKey: NotificationBadgeSettings.dockBadgeEnabledKey),
         .init(
             jsonKey: "showTitlebarBadge",
-            defaultsKey: NotificationsCatalogSection().showTitlebarBadge.userDefaultsKey
+            defaultsKey: notifications.showTitlebarBadge.userDefaultsKey
         ),
         .init(jsonKey: "showInMenuBar", defaultsKey: MenuBarExtraSettings.showInMenuBarKey),
         .init(jsonKey: "unreadPaneRing", defaultsKey: NotificationPaneRingSettings.enabledKey),

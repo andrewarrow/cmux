@@ -105,7 +105,16 @@ extension Array where Element == CuratedSettingEntry {
                 synonyms: "canvas.snappingEnabled canvas snap snapping enabled edges drag resize align panes freeform layout"
             ),
             .init(section: .app, id: "dock-badge", title: String(localized: "settings.app.dockBadge", defaultValue: "Dock Badge"), synonyms: "Dock Badge notifications.dockBadge badge dock unread count icon notifications red bubble"),
-            .init(section: .app, id: "titlebar-notification-badge", title: String(localized: "settings.notifications.showTitlebarBadge", defaultValue: "Show Title-Bar Notification Badge"), synonyms: "Show Title-Bar Notification Badge notifications.showTitlebarBadge titlebar title bar bell notification badge unread count red dot"),
+            .init(
+                section: .app,
+                id: "titlebar-notification-badge",
+                title: String(localized: "settings.notifications.showTitlebarBadge", defaultValue: "Show Title-Bar Notification Badge"),
+                detailText: String(localized: "settings.notifications.showTitlebarBadge.subtitle", defaultValue: "Show the unread count on the title-bar bell."),
+                synonyms: String(
+                    localized: "settings.search.alias.setting.app.titlebar-notification-badge",
+                    defaultValue: "notifications.showTitlebarBadge titlebar title bar bell badge notification unread count red dot"
+                )
+            ),
             .init(section: .app, id: "show-menu-bar", title: String(localized: "settings.app.showInMenuBar", defaultValue: "Show in Menu Bar"), synonyms: "Show in Menu Bar notifications.showInMenuBar menubar menu bar status item tray extra"),
             .init(section: .app, id: "unread-pane-ring", title: String(localized: "settings.notifications.paneRing.title", defaultValue: "Unread Pane Ring"), synonyms: "Unread Pane Ring notifications.unreadPaneRing blue border unread ring notification pane outline"),
             .init(section: .app, id: "pane-flash", title: String(localized: "settings.notifications.paneFlash.title", defaultValue: "Pane Flash"), synonyms: "Pane Flash notifications.paneFlash flash blink highlight pane notification pulse"),

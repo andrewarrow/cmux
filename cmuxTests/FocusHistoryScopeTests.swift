@@ -27,6 +27,45 @@ struct FocusHistoryScopeTests {
         )
     }
 
+    @Test func settingsFileRoundTripsTitlebarNotificationBadge() throws {
+        let suiteName = "FocusHistoryScopeTests.titlebarBadge.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("titlebar-badge-\(UUID().uuidString)", isDirectory: true)
+        let configURL = directory.appendingPathComponent("cmux.json")
+        let key = SettingCatalog().notifications.showTitlebarBadge.userDefaultsKey
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+            try? FileManager.default.removeItem(at: directory)
+        }
+
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try #"{"notifications":{"showTitlebarBadge":false}}"#.write(
+            to: configURL,
+            atomically: true,
+            encoding: .utf8
+        )
+        let store = CmuxSettingsFileStore(
+            primaryPath: configURL.path,
+            fallbackPath: nil,
+            additionalFallbackPaths: [],
+            notificationCenter: NotificationCenter(),
+            userDefaults: defaults,
+            startWatching: false
+        )
+
+        #expect(defaults.object(forKey: key) as? Bool == false)
+
+        try #"{"notifications":{"showTitlebarBadge":true}}"#.write(
+            to: configURL,
+            atomically: true,
+            encoding: .utf8
+        )
+        store.reload()
+
+        #expect(defaults.object(forKey: key) as? Bool == true)
+    }
+
     private func withPaneHistoryManager(_ body: (TabManager) throws -> Void) throws {
         let suiteName = "FocusHistoryScopeTests.paneHistory.\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suiteName))
