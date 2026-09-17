@@ -17,6 +17,11 @@ struct SimpleCmuxApp: App {
                 }
                 .keyboardShortcut("t", modifiers: .command)
 
+                Button(String(localized: "command.closeTab", defaultValue: "Close Tab")) {
+                    store.closeSelectedTab()
+                }
+                .keyboardShortcut("w", modifiers: .command)
+
                 Button(String(localized: "command.newWorkspace", defaultValue: "New Workspace")) {
                     store.addWorkspace()
                 }

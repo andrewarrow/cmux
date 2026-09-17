@@ -86,4 +86,13 @@ final class WorkspaceStore: ObservableObject {
     func addTab() {
         selectedWorkspace.addTab()
     }
+
+    func closeSelectedTab() {
+        let workspace = selectedWorkspace
+        guard let tab = workspace.tabs.first(where: { $0.id == workspace.selectedTabID }) else {
+            return
+        }
+
+        workspace.closeTab(tab)
+    }
 }
