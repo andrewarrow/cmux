@@ -10,6 +10,18 @@ struct TerminalView: NSViewRepresentable {
 
     private static let userConfig = GhosttyUserConfig.load()
 
+    final class Coordinator {
+        let tab: TerminalTab
+
+        init(tab: TerminalTab) {
+            self.tab = tab
+        }
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(tab: tab)
+    }
+
     func makeNSView(context: Context) -> SimpleTerminalView {
         let terminal = SimpleTerminalView(frame: .zero)
         terminal.shouldFocus = isActive
@@ -29,7 +41,8 @@ struct TerminalView: NSViewRepresentable {
         let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
         // A login, interactive shell attached to the PTY loads the user's normal
         // startup files, including ~/.zshrc for the default macOS zsh shell.
-        let workingDirectory = tab.currentDirectory ?? config.resolvedWorkingDirectory()
+        let workingDirectory = existingDirectory(at: tab.currentDirectory)
+            ?? config.resolvedWorkingDirectory()
         tab.currentDirectory = workingDirectory
         tab.currentDirectoryProvider = { [weak terminal, weak tab] in
             terminal?.currentWorkingDirectory() ?? tab?.currentDirectory
@@ -43,8 +56,20 @@ struct TerminalView: NSViewRepresentable {
         nsView.focusIfNeeded()
     }
 
-    static func dismantleNSView(_ nsView: SimpleTerminalView, coordinator: ()) {
+    static func dismantleNSView(_ nsView: SimpleTerminalView, coordinator: Coordinator) {
+        coordinator.tab.currentDirectory = nsView.currentWorkingDirectory()
+            ?? coordinator.tab.currentDirectory
         nsView.terminate()
+    }
+
+    private func existingDirectory(at path: String?) -> String? {
+        guard let path else { return nil }
+        var isDirectory = ObjCBool(false)
+        guard FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory),
+              isDirectory.boolValue else {
+            return nil
+        }
+        return path
     }
 }
 

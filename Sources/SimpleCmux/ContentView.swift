@@ -24,6 +24,12 @@ struct ContentView: View {
             .background(Color(nsColor: .windowBackgroundColor))
         }
         .frame(minWidth: 760, minHeight: 460)
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
+            store.save()
+        }
+        .onDisappear {
+            store.save()
+        }
     }
 }
 
@@ -145,7 +151,7 @@ private struct TabBar: View {
                 .clipShape(RoundedRectangle(cornerRadius: 6))
                 .contentShape(Rectangle())
                 .onTapGesture {
-                    workspace.selectedTabID = tab.id
+                    workspace.selectTab(tab)
                 }
             }
 
