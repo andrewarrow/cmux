@@ -13,7 +13,10 @@ struct ContentView: View {
 
             ZStack {
                 ForEach(store.workspaces) { workspace in
-                    WorkspaceView(workspace: workspace)
+                    WorkspaceView(
+                        workspace: workspace,
+                        isWorkspaceActive: workspace.id == store.selectedWorkspaceID
+                    )
                         .opacity(workspace.id == store.selectedWorkspaceID ? 1 : 0)
                         .allowsHitTesting(workspace.id == store.selectedWorkspaceID)
                 }
@@ -91,6 +94,7 @@ private struct WorkspaceRow: View {
 
 private struct WorkspaceView: View {
     @ObservedObject var workspace: Workspace
+    let isWorkspaceActive: Bool
 
     var body: some View {
         VStack(spacing: 0) {
@@ -99,7 +103,10 @@ private struct WorkspaceView: View {
 
             ZStack {
                 ForEach(workspace.tabs) { tab in
-                    TerminalView(tab: tab, isActive: tab.id == workspace.selectedTabID)
+                    TerminalView(
+                        tab: tab,
+                        isActive: isWorkspaceActive && tab.id == workspace.selectedTabID
+                    )
                         .opacity(tab.id == workspace.selectedTabID ? 1 : 0)
                         .allowsHitTesting(tab.id == workspace.selectedTabID)
                 }
