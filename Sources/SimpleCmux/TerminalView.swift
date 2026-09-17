@@ -46,6 +46,16 @@ struct TerminalView: NSViewRepresentable {
 final class SimpleTerminalView: LocalProcessTerminalView {
     var shouldFocus = false
 
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        if modifiers == .command,
+           event.charactersIgnoringModifiers?.lowercased() == "k" {
+            clearScreenAndScrollback()
+            return true
+        }
+        return super.performKeyEquivalent(with: event)
+    }
+
     func clearScreenAndScrollback() {
         // ED 3 removes scrollback, ED 2 clears the visible screen, and CUP H
         // returns the cursor to the top-left without sending anything to the shell.
