@@ -1,10 +1,11 @@
+import Combine
 import Foundation
 import SwiftUI
 
 final class TerminalTab: Identifiable, ObservableObject {
     let id: UUID
     let title: String
-    var currentDirectory: String?
+    @Published private(set) var currentDirectory: String?
     var currentDirectoryProvider: (() -> String?)?
 
     init(
@@ -24,24 +25,35 @@ final class TerminalTab: Identifiable, ObservableObject {
     }
 
     func refreshCurrentDirectory() {
-        currentDirectory = workingDirectoryForNewTab()
+        updateCurrentDirectory(workingDirectoryForNewTab())
+    }
+
+    func updateCurrentDirectory(_ directory: String?) {
+        guard currentDirectory != directory else { return }
+        currentDirectory = directory
     }
 }
 
 final class Workspace: Identifiable, ObservableObject {
     let id: UUID
-    let name: String
+    private let fallbackName: String
     @Published private(set) var tabs: [TerminalTab]
     @Published private(set) var selectedTabID: TerminalTab.ID
 
     var didChange: (() -> Void)?
+    private var firstTabDirectoryObservation: AnyCancellable?
+
+    var name: String {
+        tabs.first?.currentDirectory ?? fallbackName
+    }
 
     init(name: String) {
         id = UUID()
-        self.name = name
+        fallbackName = name
         let firstTab = TerminalTab(number: 1)
         tabs = [firstTab]
         selectedTabID = firstTab.id
+        observeFirstTabDirectory()
     }
 
     fileprivate init(
@@ -51,11 +63,12 @@ final class Workspace: Identifiable, ObservableObject {
         selectedTabID: TerminalTab.ID
     ) {
         self.id = id
-        self.name = name
+        fallbackName = name
         self.tabs = tabs
         self.selectedTabID = tabs.contains { $0.id == selectedTabID }
             ? selectedTabID
             : tabs[0].id
+        observeFirstTabDirectory()
     }
 
     @discardableResult
@@ -85,7 +98,16 @@ final class Workspace: Identifiable, ObservableObject {
         if selectedTabID == tab.id {
             selectedTabID = tabs[min(index, tabs.count - 1)].id
         }
+        observeFirstTabDirectory()
         didChange?()
+    }
+
+    private func observeFirstTabDirectory() {
+        firstTabDirectoryObservation = tabs.first?.$currentDirectory
+            .dropFirst()
+            .sink { [weak self] _ in
+                self?.objectWillChange.send()
+            }
     }
 }
 

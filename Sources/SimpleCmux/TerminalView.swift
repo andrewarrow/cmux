@@ -12,9 +12,37 @@ struct TerminalView: NSViewRepresentable {
 
     final class Coordinator {
         let tab: TerminalTab
+        private weak var terminal: SimpleTerminalView?
+        private var directoryTimer: Timer?
 
         init(tab: TerminalTab) {
             self.tab = tab
+        }
+
+        func startTrackingDirectory(of terminal: SimpleTerminalView) {
+            self.terminal = terminal
+            refreshDirectory()
+
+            let timer = Timer(timeInterval: 0.5, repeats: true) { [weak self] _ in
+                self?.refreshDirectory()
+            }
+            RunLoop.main.add(timer, forMode: .common)
+            directoryTimer = timer
+        }
+
+        func stopTrackingDirectory() {
+            directoryTimer?.invalidate()
+            directoryTimer = nil
+            terminal = nil
+        }
+
+        private func refreshDirectory() {
+            guard let directory = terminal?.currentWorkingDirectory() else { return }
+            tab.updateCurrentDirectory(directory)
+        }
+
+        deinit {
+            directoryTimer?.invalidate()
         }
     }
 
@@ -43,11 +71,12 @@ struct TerminalView: NSViewRepresentable {
         // startup files, including ~/.zshrc for the default macOS zsh shell.
         let workingDirectory = existingDirectory(at: tab.currentDirectory)
             ?? config.resolvedWorkingDirectory()
-        tab.currentDirectory = workingDirectory
+        tab.updateCurrentDirectory(workingDirectory)
         tab.currentDirectoryProvider = { [weak terminal, weak tab] in
             terminal?.currentWorkingDirectory() ?? tab?.currentDirectory
         }
         terminal.startProcess(executable: shell, args: ["-l", "-i"], currentDirectory: workingDirectory)
+        context.coordinator.startTrackingDirectory(of: terminal)
         return terminal
     }
 
@@ -57,8 +86,10 @@ struct TerminalView: NSViewRepresentable {
     }
 
     static func dismantleNSView(_ nsView: SimpleTerminalView, coordinator: Coordinator) {
-        coordinator.tab.currentDirectory = nsView.currentWorkingDirectory()
-            ?? coordinator.tab.currentDirectory
+        coordinator.tab.updateCurrentDirectory(
+            nsView.currentWorkingDirectory() ?? coordinator.tab.currentDirectory
+        )
+        coordinator.stopTrackingDirectory()
         nsView.terminate()
     }
 
