@@ -1,4 +1,5 @@
 import AppKit
+import Foundation
 import SwiftTerm
 import SwiftUI
 
@@ -14,7 +15,10 @@ struct TerminalView: NSViewRepresentable {
         terminal.nativeForegroundColor = NSColor(calibratedWhite: 0.92, alpha: 1)
 
         let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
-        terminal.startProcess(executable: shell, args: ["-l"])
+        let homeDirectory = FileManager.default.homeDirectoryForCurrentUser.path
+        // A login, interactive shell attached to the PTY loads the user's normal
+        // startup files, including ~/.zshrc for the default macOS zsh shell.
+        terminal.startProcess(executable: shell, args: ["-l", "-i"], currentDirectory: homeDirectory)
         return terminal
     }
 
