@@ -13,6 +13,7 @@
 		100000000000000000000004 /* TerminalView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000014 /* TerminalView.swift */; };
 		100000000000000000000005 /* SwiftTerm in Frameworks */ = {isa = PBXBuildFile; productRef = 100000000000000000000021 /* SwiftTerm */; };
 		100000000000000000000006 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000015 /* Assets.xcassets */; };
+		100000000000000000000007 /* GhosttyUserConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000016 /* GhosttyUserConfig.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -22,6 +23,7 @@
 		100000000000000000000013 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		100000000000000000000014 /* TerminalView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalView.swift; sourceTree = "<group>"; };
 		100000000000000000000015 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		100000000000000000000016 /* GhosttyUserConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GhosttyUserConfig.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -43,6 +45,7 @@
 				100000000000000000000012 /* WorkspaceModel.swift */,
 				100000000000000000000013 /* ContentView.swift */,
 				100000000000000000000014 /* TerminalView.swift */,
+				100000000000000000000016 /* GhosttyUserConfig.swift */,
 			);
 			path = Sources/SimpleCmux;
 			sourceTree = "<group>";
@@ -145,6 +148,7 @@
 				100000000000000000000002 /* WorkspaceModel.swift in Sources */,
 				100000000000000000000003 /* ContentView.swift in Sources */,
 				100000000000000000000004 /* TerminalView.swift in Sources */,
+				100000000000000000000007 /* GhosttyUserConfig.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

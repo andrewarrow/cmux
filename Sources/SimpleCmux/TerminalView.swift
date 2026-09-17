@@ -7,18 +7,29 @@ struct TerminalView: NSViewRepresentable {
     let tab: TerminalTab
     let isActive: Bool
 
+    private static let userConfig = GhosttyUserConfig.load()
+
     func makeNSView(context: Context) -> SimpleTerminalView {
         let terminal = SimpleTerminalView(frame: .zero)
         terminal.shouldFocus = isActive
-        terminal.font = .monospacedSystemFont(ofSize: 13, weight: .regular)
-        terminal.nativeBackgroundColor = NSColor(calibratedWhite: 0.08, alpha: 1)
-        terminal.nativeForegroundColor = NSColor(calibratedWhite: 0.92, alpha: 1)
+        let config = Self.userConfig
+        let fontSize = config.fontSize ?? 13
+        if let fontFamily = config.fontFamily,
+           let configuredFont = NSFont(name: fontFamily, size: fontSize) {
+            terminal.font = configuredFont
+        } else {
+            terminal.font = .monospacedSystemFont(ofSize: fontSize, weight: .regular)
+        }
+        terminal.nativeBackgroundColor = config.backgroundColor
+            ?? NSColor(calibratedWhite: 0.08, alpha: 1)
+        terminal.nativeForegroundColor = config.foregroundColor
+            ?? NSColor(calibratedWhite: 0.92, alpha: 1)
 
         let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
-        let homeDirectory = FileManager.default.homeDirectoryForCurrentUser.path
         // A login, interactive shell attached to the PTY loads the user's normal
         // startup files, including ~/.zshrc for the default macOS zsh shell.
-        terminal.startProcess(executable: shell, args: ["-l", "-i"], currentDirectory: homeDirectory)
+        let workingDirectory = config.resolvedWorkingDirectory()
+        terminal.startProcess(executable: shell, args: ["-l", "-i"], currentDirectory: workingDirectory)
         return terminal
     }
 
