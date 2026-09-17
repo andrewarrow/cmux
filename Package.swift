@@ -17,10 +17,6 @@ let package = Package(
             dependencies: [
                 .product(name: "SwiftTerm", package: "SwiftTerm")
             ]
-        ),
-        .testTarget(
-            name: "SimpleCmuxTests",
-            dependencies: ["SimpleCmux"]
         )
     ]
 )

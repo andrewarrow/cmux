@@ -44,7 +44,10 @@ final class Workspace: Identifiable, ObservableObject {
     private var firstTabDirectoryObservation: AnyCancellable?
 
     var name: String {
-        tabs.first?.currentDirectory ?? fallbackName
+        guard let currentDirectory = tabs.first?.currentDirectory else {
+            return fallbackName
+        }
+        return Self.title(for: currentDirectory)
     }
 
     init(name: String) {
@@ -108,6 +111,21 @@ final class Workspace: Identifiable, ObservableObject {
             .sink { [weak self] _ in
                 self?.objectWillChange.send()
             }
+    }
+
+    private static func title(for directory: String) -> String {
+        let directoryURL = URL(fileURLWithPath: directory).standardizedFileURL
+        let homeURL = FileManager.default.homeDirectoryForCurrentUser.standardizedFileURL
+        let directoryComponents = directoryURL.pathComponents
+        let homeComponents = homeURL.pathComponents
+
+        if directoryComponents.starts(with: homeComponents) {
+            guard directoryComponents.count > homeComponents.count else { return "~" }
+            return directoryComponents[homeComponents.count]
+        }
+
+        let lastComponent = directoryURL.lastPathComponent
+        return lastComponent.isEmpty ? directory : lastComponent
     }
 }
 
