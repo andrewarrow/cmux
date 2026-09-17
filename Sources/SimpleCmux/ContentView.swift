@@ -128,31 +128,13 @@ private struct TabBar: View {
     var body: some View {
         HStack(spacing: 4) {
             ForEach(workspace.tabs) { tab in
-                HStack(spacing: 7) {
-                    Image(systemName: "terminal")
-                        .font(.caption)
-                    Text(tab.title)
-                        .lineLimit(1)
-                    if workspace.tabs.count > 1 {
-                        Button {
-                            workspace.closeTab(tab)
-                        } label: {
-                            Image(systemName: "xmark")
-                                .font(.caption2)
-                        }
-                        .buttonStyle(.borderless)
-                        .foregroundStyle(.secondary)
-                        .accessibilityLabel(String(localized: "tab.close", defaultValue: "Close tab"))
-                    }
-                }
-                .padding(.horizontal, 11)
-                .padding(.vertical, 7)
-                .background(tab.id == workspace.selectedTabID ? Color.accentColor.opacity(0.18) : .clear)
-                .clipShape(RoundedRectangle(cornerRadius: 6))
-                .contentShape(Rectangle())
-                .onTapGesture {
-                    workspace.selectTab(tab)
-                }
+                TabItem(
+                    tab: tab,
+                    isSelected: tab.id == workspace.selectedTabID,
+                    canClose: workspace.tabs.count > 1,
+                    onSelect: { workspace.selectTab(tab) },
+                    onClose: { workspace.closeTab(tab) }
+                )
             }
 
             Button {
@@ -170,5 +152,37 @@ private struct TabBar: View {
         .padding(.horizontal, 8)
         .padding(.vertical, 5)
         .background(Color(nsColor: .controlBackgroundColor))
+    }
+}
+
+private struct TabItem: View {
+    @ObservedObject var tab: TerminalTab
+    let isSelected: Bool
+    let canClose: Bool
+    let onSelect: () -> Void
+    let onClose: () -> Void
+
+    var body: some View {
+        HStack(spacing: 7) {
+            Image(systemName: "terminal")
+                .font(.caption)
+            Text(tab.title)
+                .lineLimit(1)
+            if canClose {
+                Button(action: onClose) {
+                    Image(systemName: "xmark")
+                        .font(.caption2)
+                }
+                .buttonStyle(.borderless)
+                .foregroundStyle(.secondary)
+                .accessibilityLabel(String(localized: "tab.close", defaultValue: "Close tab"))
+            }
+        }
+        .padding(.horizontal, 11)
+        .padding(.vertical, 7)
+        .background(isSelected ? Color.accentColor.opacity(0.18) : .clear)
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+        .contentShape(Rectangle())
+        .onTapGesture(perform: onSelect)
     }
 }

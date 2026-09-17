@@ -4,9 +4,17 @@ import SwiftUI
 
 final class TerminalTab: Identifiable, ObservableObject {
     let id: UUID
-    let title: String
+    private let fallbackTitle: String
     @Published private(set) var currentDirectory: String?
     var currentDirectoryProvider: (() -> String?)?
+
+    var title: String {
+        guard let currentDirectory else { return fallbackTitle }
+        let lastComponent = URL(fileURLWithPath: currentDirectory)
+            .standardizedFileURL
+            .lastPathComponent
+        return lastComponent.isEmpty ? currentDirectory : lastComponent
+    }
 
     init(
         id: UUID = UUID(),
@@ -15,7 +23,7 @@ final class TerminalTab: Identifiable, ObservableObject {
         currentDirectory: String? = nil
     ) {
         self.id = id
-        self.title = title
+        fallbackTitle = title
             ?? String(localized: "terminal.title", defaultValue: "Terminal \(number)")
         self.currentDirectory = currentDirectory
     }
