@@ -52,6 +52,7 @@ struct TerminalView: NSViewRepresentable {
 
     func makeNSView(context: Context) -> SimpleTerminalView {
         let terminal = SimpleTerminalView(frame: .zero)
+        terminal.registerForDraggedTypes([.fileURL])
         terminal.shouldFocus = isActive
         let config = Self.userConfig
         let fontSize = config.fontSize ?? 13
@@ -107,6 +108,20 @@ struct TerminalView: NSViewRepresentable {
 final class SimpleTerminalView: LocalProcessTerminalView {
     var shouldFocus = false
 
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        fileURLs(from: sender).isEmpty ? [] : .copy
+    }
+
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        let urls = fileURLs(from: sender)
+        guard !urls.isEmpty else { return false }
+
+        let paths = urls.map { shellQuoted($0.path) }.joined(separator: " ") + " "
+        sendAsPaste(paths)
+        window?.makeFirstResponder(self)
+        return true
+    }
+
     func currentWorkingDirectory() -> String? {
         guard process.shellPid > 0 else { return nil }
 
@@ -139,6 +154,30 @@ final class SimpleTerminalView: LocalProcessTerminalView {
         // returns the cursor to the top-left without sending anything to the shell.
         terminal.feed(text: "\u{1B}[3J\u{1B}[2J\u{1B}[H")
         focusIfNeeded()
+    }
+
+    private func fileURLs(from draggingInfo: NSDraggingInfo) -> [URL] {
+        let options: [NSPasteboard.ReadingOptionKey: Any] = [
+            .urlReadingFileURLsOnly: true
+        ]
+        return draggingInfo.draggingPasteboard.readObjects(
+            forClasses: [NSURL.self],
+            options: options
+        ) as? [URL] ?? []
+    }
+
+    private func shellQuoted(_ path: String) -> String {
+        "'" + path.replacingOccurrences(of: "'", with: "'\\''") + "'"
+    }
+
+    private func sendAsPaste(_ text: String) {
+        if terminal.bracketedPasteMode {
+            send(data: EscapeSequences.bracketedPasteStart[...])
+        }
+        send(txt: text)
+        if terminal.bracketedPasteMode {
+            send(data: EscapeSequences.bracketedPasteEnd[...])
+        }
     }
 
     override func viewDidMoveToWindow() {
