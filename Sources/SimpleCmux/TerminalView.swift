@@ -46,6 +46,13 @@ struct TerminalView: NSViewRepresentable {
 final class SimpleTerminalView: LocalProcessTerminalView {
     var shouldFocus = false
 
+    func clearScreenAndScrollback() {
+        // ED 3 removes scrollback, ED 2 clears the visible screen, and CUP H
+        // returns the cursor to the top-left without sending anything to the shell.
+        terminal.feed(text: "\u{1B}[3J\u{1B}[2J\u{1B}[H")
+        focusIfNeeded()
+    }
+
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         focusIfNeeded()
