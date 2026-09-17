@@ -52,8 +52,8 @@ struct TerminalView: NSViewRepresentable {
 
     func makeNSView(context: Context) -> SimpleTerminalView {
         let terminal = SimpleTerminalView(frame: .zero)
-        terminal.registerForDraggedTypes([.fileURL])
         terminal.shouldFocus = isActive
+        terminal.setAcceptsFileDrops(isActive)
         let config = Self.userConfig
         let fontSize = config.fontSize ?? 13
         if let fontFamily = config.fontFamily,
@@ -83,6 +83,7 @@ struct TerminalView: NSViewRepresentable {
 
     func updateNSView(_ nsView: SimpleTerminalView, context: Context) {
         nsView.shouldFocus = isActive
+        nsView.setAcceptsFileDrops(isActive)
         nsView.focusIfNeeded()
     }
 
@@ -107,6 +108,18 @@ struct TerminalView: NSViewRepresentable {
 
 final class SimpleTerminalView: LocalProcessTerminalView {
     var shouldFocus = false
+    private var acceptsFileDrops = false
+
+    func setAcceptsFileDrops(_ acceptsFileDrops: Bool) {
+        guard self.acceptsFileDrops != acceptsFileDrops else { return }
+        self.acceptsFileDrops = acceptsFileDrops
+
+        if acceptsFileDrops {
+            registerForDraggedTypes([.fileURL])
+        } else {
+            unregisterDraggedTypes()
+        }
+    }
 
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
         fileURLs(from: sender).isEmpty ? [] : .copy
