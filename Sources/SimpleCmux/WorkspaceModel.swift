@@ -92,6 +92,14 @@ final class Workspace: Identifiable, ObservableObject {
         didChange?()
     }
 
+    func selectPreviousTab() {
+        selectTab(offsetBy: -1)
+    }
+
+    func selectNextTab() {
+        selectTab(offsetBy: 1)
+    }
+
     func closeTab(_ tab: TerminalTab) {
         guard tabs.count > 1, let index = tabs.firstIndex(where: { $0.id == tab.id }) else {
             return
@@ -111,6 +119,16 @@ final class Workspace: Identifiable, ObservableObject {
             .sink { [weak self] _ in
                 self?.objectWillChange.send()
             }
+    }
+
+    private func selectTab(offsetBy offset: Int) {
+        guard tabs.count > 1,
+              let selectedIndex = tabs.firstIndex(where: { $0.id == selectedTabID }) else {
+            return
+        }
+
+        let index = (selectedIndex + offset + tabs.count) % tabs.count
+        selectTab(tabs[index])
     }
 
     private static func title(for directory: String) -> String {
@@ -193,6 +211,14 @@ final class WorkspaceStore: ObservableObject {
         }
 
         workspace.closeTab(tab)
+    }
+
+    func selectPreviousTab() {
+        selectedWorkspace.selectPreviousTab()
+    }
+
+    func selectNextTab() {
+        selectedWorkspace.selectNextTab()
     }
 
     func save() {
