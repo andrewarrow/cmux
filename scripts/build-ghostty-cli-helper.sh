@@ -276,7 +276,7 @@ build_helper() {
     # Zig 0.15.x treats SDKROOT as a sysroot override. Xcode exports SDKROOT to
     # the macOS SDK, which makes Zig look for SDK paths under that SDK again and
     # leaves build-runner binaries unlinked against libSystem on a cold cache.
-    env -u SDKROOT "${args[@]}"
+    PATH="$(dirname "$zig_bin"):$PATH" /usr/bin/env -u SDKROOT "${args[@]}"
   )
 }
 
