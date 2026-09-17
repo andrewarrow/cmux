@@ -1,4 +1,5 @@
 import AppKit
+import Darwin
 import Foundation
 import SwiftTerm
 import SwiftUI
@@ -28,7 +29,11 @@ struct TerminalView: NSViewRepresentable {
         let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
         // A login, interactive shell attached to the PTY loads the user's normal
         // startup files, including ~/.zshrc for the default macOS zsh shell.
-        let workingDirectory = config.resolvedWorkingDirectory()
+        let workingDirectory = tab.currentDirectory ?? config.resolvedWorkingDirectory()
+        tab.currentDirectory = workingDirectory
+        tab.currentDirectoryProvider = { [weak terminal, weak tab] in
+            terminal?.currentWorkingDirectory() ?? tab?.currentDirectory
+        }
         terminal.startProcess(executable: shell, args: ["-l", "-i"], currentDirectory: workingDirectory)
         return terminal
     }
@@ -45,6 +50,23 @@ struct TerminalView: NSViewRepresentable {
 
 final class SimpleTerminalView: LocalProcessTerminalView {
     var shouldFocus = false
+
+    func currentWorkingDirectory() -> String? {
+        guard process.shellPid > 0 else { return nil }
+
+        var info = proc_vnodepathinfo()
+        let size = Int32(MemoryLayout<proc_vnodepathinfo>.size)
+        let result = withUnsafeMutablePointer(to: &info) { pointer in
+            proc_pidinfo(process.shellPid, PROC_PIDVNODEPATHINFO, 0, pointer, size)
+        }
+        guard result == size else { return nil }
+
+        return withUnsafePointer(to: &info.pvi_cdir.vip_path) { pointer in
+            pointer.withMemoryRebound(to: CChar.self, capacity: Int(MAXPATHLEN)) { path in
+                String(cString: path)
+            }
+        }
+    }
 
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
         let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)

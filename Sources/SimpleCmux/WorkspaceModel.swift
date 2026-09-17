@@ -4,9 +4,16 @@ import SwiftUI
 final class TerminalTab: Identifiable, ObservableObject {
     let id = UUID()
     let title: String
+    var currentDirectory: String?
+    var currentDirectoryProvider: (() -> String?)?
 
-    init(number: Int) {
+    init(number: Int, currentDirectory: String? = nil) {
         title = String(localized: "terminal.title", defaultValue: "Terminal \(number)")
+        self.currentDirectory = currentDirectory
+    }
+
+    func workingDirectoryForNewTab() -> String? {
+        currentDirectoryProvider?() ?? currentDirectory
     }
 }
 
@@ -25,7 +32,8 @@ final class Workspace: Identifiable, ObservableObject {
 
     @discardableResult
     func addTab() -> TerminalTab {
-        let tab = TerminalTab(number: tabs.count + 1)
+        let currentDirectory = tabs.first { $0.id == selectedTabID }?.workingDirectoryForNewTab()
+        let tab = TerminalTab(number: tabs.count + 1, currentDirectory: currentDirectory)
         tabs.append(tab)
         selectedTabID = tab.id
         return tab
