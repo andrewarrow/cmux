@@ -14,6 +14,7 @@ struct TerminalView: NSViewRepresentable {
         let tab: TerminalTab
         private weak var terminal: SimpleTerminalView?
         private var directoryTimer: Timer?
+        private let codexActivityMonitor = CodexActivityMonitor()
 
         init(tab: TerminalTab) {
             self.tab = tab
@@ -43,7 +44,11 @@ struct TerminalView: NSViewRepresentable {
 
         private func refreshState() {
             refreshDirectory()
-            tab.updateCodexRunning(terminal?.hasRunningCodexProcess ?? false)
+            tab.updateCodexRunning(
+                codexActivityMonitor.isPromptRunning(
+                    below: terminal?.process.shellPid ?? 0
+                )
+            )
         }
 
         deinit {
@@ -157,10 +162,6 @@ final class SimpleTerminalView: LocalProcessTerminalView {
         }
     }
 
-    var hasRunningCodexProcess: Bool {
-        ProcessTree.containsProcess(named: "codex", below: process.shellPid)
-    }
-
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
         let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         if modifiers == .command,
@@ -216,15 +217,186 @@ final class SimpleTerminalView: LocalProcessTerminalView {
     }
 }
 
+private final class CodexActivityMonitor {
+    private var processID: pid_t?
+    private var processStartedAt: Date?
+    private var transcriptURL: URL?
+    private var transcriptOffset: UInt64 = 0
+    private var pendingTranscriptData = Data()
+    private var promptIsRunning = false
+
+    func isPromptRunning(below shellPID: pid_t) -> Bool {
+        guard let process = ProcessTree.codexProcess(below: shellPID) else {
+            reset()
+            return false
+        }
+
+        if processID != process.id || processStartedAt != process.startedAt {
+            reset(for: process)
+        }
+
+        if transcriptURL == nil {
+            transcriptURL = findTranscript(for: process)
+        }
+        guard let transcriptURL else { return false }
+
+        readNewEvents(from: transcriptURL)
+        return promptIsRunning
+    }
+
+    private func reset(for process: ProcessTree.CodexProcess? = nil) {
+        processID = process?.id
+        processStartedAt = process?.startedAt
+        transcriptURL = nil
+        transcriptOffset = 0
+        pendingTranscriptData.removeAll(keepingCapacity: true)
+        promptIsRunning = false
+    }
+
+    private func findTranscript(for process: ProcessTree.CodexProcess) -> URL? {
+        let sessionsRoot = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".codex/sessions", isDirectory: true)
+        let dates = Set([process.startedAt, Date()])
+        var candidates: [(url: URL, startedAt: Date, modifiedAt: Date)] = []
+
+        for date in dates {
+            let components = Calendar.current.dateComponents([.year, .month, .day], from: date)
+            guard let year = components.year,
+                  let month = components.month,
+                  let day = components.day else {
+                continue
+            }
+            let directory = sessionsRoot
+                .appendingPathComponent(String(format: "%04d", year), isDirectory: true)
+                .appendingPathComponent(String(format: "%02d", month), isDirectory: true)
+                .appendingPathComponent(String(format: "%02d", day), isDirectory: true)
+            guard let urls = try? FileManager.default.contentsOfDirectory(
+                at: directory,
+                includingPropertiesForKeys: [.contentModificationDateKey],
+                options: [.skipsHiddenFiles]
+            ) else {
+                continue
+            }
+
+            for url in urls where url.pathExtension == "jsonl" {
+                guard let startedAt = transcriptStartDate(from: url.lastPathComponent),
+                      transcriptWorkingDirectory(at: url) == process.currentDirectory else {
+                    continue
+                }
+                let modifiedAt = (try? url.resourceValues(
+                    forKeys: [.contentModificationDateKey]
+                ).contentModificationDate) ?? .distantPast
+                candidates.append((url, startedAt, modifiedAt))
+            }
+        }
+
+        if let launchMatch = candidates.min(by: {
+            abs($0.startedAt.timeIntervalSince(process.startedAt))
+                < abs($1.startedAt.timeIntervalSince(process.startedAt))
+        }), abs(launchMatch.startedAt.timeIntervalSince(process.startedAt)) < 30 {
+            return launchMatch.url
+        }
+
+        guard process.arguments.contains("resume") else { return nil }
+        return candidates
+            .filter { $0.modifiedAt >= process.startedAt }
+            .max(by: { $0.modifiedAt < $1.modifiedAt })?
+            .url
+    }
+
+    private func transcriptStartDate(from filename: String) -> Date? {
+        let timestampLength = 27
+        guard filename.count >= timestampLength else { return nil }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = .current
+        formatter.dateFormat = "'rollout-'yyyy-MM-dd'T'HH-mm-ss"
+        return formatter.date(from: String(filename.prefix(timestampLength)))
+    }
+
+    private func transcriptWorkingDirectory(at url: URL) -> String? {
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
+        defer { try? handle.close() }
+        guard let data = try? handle.read(upToCount: 256 * 1024),
+              let newline = data.firstIndex(of: 0x0A),
+              let object = try? JSONSerialization.jsonObject(with: data[..<newline]),
+              let envelope = object as? [String: Any],
+              envelope["type"] as? String == "session_meta",
+              let payload = envelope["payload"] as? [String: Any],
+              let directory = payload["cwd"] as? String else {
+            return nil
+        }
+        return URL(fileURLWithPath: directory).standardizedFileURL.path
+    }
+
+    private func readNewEvents(from url: URL) {
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return }
+        defer { try? handle.close() }
+
+        let fileSize = (try? handle.seekToEnd()) ?? 0
+        if fileSize < transcriptOffset {
+            transcriptOffset = 0
+            pendingTranscriptData.removeAll(keepingCapacity: true)
+            promptIsRunning = false
+        }
+        guard fileSize > transcriptOffset else { return }
+
+        do {
+            try handle.seek(toOffset: transcriptOffset)
+            guard let newData = try handle.readToEnd(), !newData.isEmpty else { return }
+            transcriptOffset += UInt64(newData.count)
+            pendingTranscriptData.append(newData)
+        } catch {
+            return
+        }
+
+        let hasCompleteLastLine = pendingTranscriptData.last == 0x0A
+        let lines = pendingTranscriptData.split(
+            separator: 0x0A,
+            omittingEmptySubsequences: false
+        )
+        let completeLines = lines.dropLast()
+        pendingTranscriptData = hasCompleteLastLine
+            ? Data()
+            : Data(lines.last ?? Data.SubSequence())
+
+        for line in completeLines where !line.isEmpty {
+            guard let object = try? JSONSerialization.jsonObject(with: line),
+                  let envelope = object as? [String: Any],
+                  envelope["type"] as? String == "event_msg",
+                  let payload = envelope["payload"] as? [String: Any],
+                  let eventType = payload["type"] as? String else {
+                continue
+            }
+            switch eventType {
+            case "task_started":
+                promptIsRunning = true
+            case "task_complete", "turn_aborted":
+                promptIsRunning = false
+            default:
+                break
+            }
+        }
+    }
+}
+
 private enum ProcessTree {
+    struct CodexProcess {
+        let id: pid_t
+        let startedAt: Date
+        let currentDirectory: String
+        let arguments: [String]
+    }
+
     private struct ProcessInfo {
         let parentID: pid_t
         let name: String
         let arguments: [String]
+        let startedAt: Date
     }
 
-    static func containsProcess(named targetName: String, below rootPID: pid_t) -> Bool {
-        guard rootPID > 0 else { return false }
+    static func codexProcess(below rootPID: pid_t) -> CodexProcess? {
+        guard rootPID > 0 else { return nil }
 
         let processes = allProcesses()
         var childrenByParent: [pid_t: [pid_t]] = [:]
@@ -233,20 +405,29 @@ private enum ProcessTree {
         }
 
         var pending = childrenByParent[rootPID, default: []]
+        var launcherMatch: CodexProcess?
         while let pid = pending.popLast() {
             guard let info = processes[pid] else { continue }
-            if info.name == targetName
-                || info.name.hasPrefix("\(targetName)-")
-                || info.arguments.contains(where: { argument in
+            let isNativeCodex = info.name == "codex" || info.name.hasPrefix("codex-")
+            let isCodexLauncher = info.arguments.contains(where: { argument in
                     let name = URL(fileURLWithPath: argument).lastPathComponent
                         .lowercased()
-                    return name == targetName || name == "\(targetName).js"
-                }) {
-                return true
+                    return name == "codex" || name == "codex.js"
+                })
+            if (isNativeCodex || isCodexLauncher),
+               let directory = currentDirectory(of: pid) {
+                let match = CodexProcess(
+                    id: pid,
+                    startedAt: info.startedAt,
+                    currentDirectory: directory,
+                    arguments: info.arguments
+                )
+                if isNativeCodex { return match }
+                launcherMatch = launcherMatch ?? match
             }
             pending.append(contentsOf: childrenByParent[pid, default: []])
         }
-        return false
+        return launcherMatch
     }
 
     private static func allProcesses() -> [pid_t: ProcessInfo] {
@@ -286,10 +467,29 @@ private enum ProcessTree {
             result[pid] = ProcessInfo(
                 parentID: pid_t(info.pbi_ppid),
                 name: name,
-                arguments: arguments
+                arguments: arguments,
+                startedAt: Date(
+                    timeIntervalSince1970: TimeInterval(info.pbi_start_tvsec)
+                        + TimeInterval(info.pbi_start_tvusec) / 1_000_000
+                )
             )
         }
         return result
+    }
+
+    private static func currentDirectory(of pid: pid_t) -> String? {
+        var info = proc_vnodepathinfo()
+        let size = Int32(MemoryLayout<proc_vnodepathinfo>.size)
+        let result = withUnsafeMutablePointer(to: &info) { pointer in
+            proc_pidinfo(pid, PROC_PIDVNODEPATHINFO, 0, pointer, size)
+        }
+        guard result == size else { return nil }
+
+        return withUnsafePointer(to: &info.pvi_cdir.vip_path) { pointer in
+            pointer.withMemoryRebound(to: CChar.self, capacity: Int(MAXPATHLEN)) {
+                URL(fileURLWithPath: String(cString: $0)).standardizedFileURL.path
+            }
+        }
     }
 
     private static func processArguments(for pid: pid_t) -> [String] {
