@@ -76,8 +76,16 @@ private struct WorkspaceRow: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            Image(systemName: "rectangle.3.group")
-                .foregroundStyle(isSelected ? Color.accentColor : .secondary)
+            Group {
+                if workspace.hasRunningCodex {
+                    ProgressView()
+                        .controlSize(.small)
+                        .accessibilityLabel(String(localized: "sidebar.codexRunning", defaultValue: "Codex is running"))
+                } else {
+                    Image(systemName: "rectangle.3.group")
+                        .foregroundStyle(isSelected ? Color.accentColor : .secondary)
+                }
+            }
                 .frame(width: 18)
 
             VStack(alignment: .leading, spacing: 2) {

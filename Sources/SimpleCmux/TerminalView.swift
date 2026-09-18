@@ -24,7 +24,7 @@ struct TerminalView: NSViewRepresentable {
             refreshDirectory()
 
             let timer = Timer(timeInterval: 0.5, repeats: true) { [weak self] _ in
-                self?.refreshDirectory()
+                self?.refreshState()
             }
             RunLoop.main.add(timer, forMode: .common)
             directoryTimer = timer
@@ -39,6 +39,11 @@ struct TerminalView: NSViewRepresentable {
         private func refreshDirectory() {
             guard let directory = terminal?.currentWorkingDirectory() else { return }
             tab.updateCurrentDirectory(directory)
+        }
+
+        private func refreshState() {
+            refreshDirectory()
+            tab.updateCodexRunning(terminal?.hasRunningCodexProcess ?? false)
         }
 
         deinit {
@@ -152,6 +157,10 @@ final class SimpleTerminalView: LocalProcessTerminalView {
         }
     }
 
+    var hasRunningCodexProcess: Bool {
+        ProcessTree.containsProcess(named: "codex", below: process.shellPid)
+    }
+
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
         let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         if modifiers == .command,
@@ -204,5 +213,101 @@ final class SimpleTerminalView: LocalProcessTerminalView {
             guard let self, let window, self.shouldFocus else { return }
             window.makeFirstResponder(self)
         }
+    }
+}
+
+private enum ProcessTree {
+    private struct ProcessInfo {
+        let parentID: pid_t
+        let name: String
+        let arguments: [String]
+    }
+
+    static func containsProcess(named targetName: String, below rootPID: pid_t) -> Bool {
+        guard rootPID > 0 else { return false }
+
+        let processes = allProcesses()
+        var childrenByParent: [pid_t: [pid_t]] = [:]
+        for (pid, info) in processes {
+            childrenByParent[info.parentID, default: []].append(pid)
+        }
+
+        var pending = childrenByParent[rootPID, default: []]
+        while let pid = pending.popLast() {
+            guard let info = processes[pid] else { continue }
+            if info.name == targetName
+                || info.name.hasPrefix("\(targetName)-")
+                || info.arguments.contains(where: { argument in
+                    let name = URL(fileURLWithPath: argument).lastPathComponent
+                        .lowercased()
+                    return name == targetName || name == "\(targetName).js"
+                }) {
+                return true
+            }
+            pending.append(contentsOf: childrenByParent[pid, default: []])
+        }
+        return false
+    }
+
+    private static func allProcesses() -> [pid_t: ProcessInfo] {
+        let requestedSize = proc_listpids(UInt32(PROC_ALL_PIDS), 0, nil, 0)
+        guard requestedSize > 0 else { return [:] }
+
+        var pids = [pid_t](repeating: 0, count: Int(requestedSize) / MemoryLayout<pid_t>.size + 1)
+        let actualSize = pids.withUnsafeMutableBytes { buffer in
+            proc_listpids(
+                UInt32(PROC_ALL_PIDS),
+                0,
+                buffer.baseAddress,
+                Int32(buffer.count)
+            )
+        }
+        guard actualSize > 0 else { return [:] }
+
+        let count = Int(actualSize) / MemoryLayout<pid_t>.size
+        var result: [pid_t: ProcessInfo] = [:]
+        for pid in pids.prefix(count) where pid > 0 {
+            var info = proc_bsdinfo()
+            let infoSize = Int32(MemoryLayout<proc_bsdinfo>.size)
+            let readSize = withUnsafeMutablePointer(to: &info) { pointer in
+                proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, pointer, infoSize)
+            }
+            guard readSize == infoSize else { continue }
+
+            let comm = info.pbi_comm
+            let name = withUnsafePointer(to: comm) { pointer in
+                pointer.withMemoryRebound(to: CChar.self, capacity: MemoryLayout.size(ofValue: comm)) {
+                    String(cString: $0)
+                }
+            }.lowercased()
+            let arguments = name == "node" || name == "codex"
+                ? processArguments(for: pid)
+                : []
+            result[pid] = ProcessInfo(
+                parentID: pid_t(info.pbi_ppid),
+                name: name,
+                arguments: arguments
+            )
+        }
+        return result
+    }
+
+    private static func processArguments(for pid: pid_t) -> [String] {
+        var mib = [Int32(CTL_KERN), Int32(KERN_PROCARGS2), pid]
+        var size = 0
+        guard sysctl(&mib, UInt32(mib.count), nil, &size, nil, 0) == 0,
+              size > MemoryLayout<Int32>.size else {
+            return []
+        }
+
+        var bytes = [UInt8](repeating: 0, count: size)
+        let result = bytes.withUnsafeMutableBytes { buffer in
+            sysctl(&mib, UInt32(mib.count), buffer.baseAddress, &size, nil, 0)
+        }
+        guard result == 0 else { return [] }
+
+        return bytes.dropFirst(MemoryLayout<Int32>.size)
+            .split(separator: 0)
+            .compactMap { String(bytes: $0, encoding: .utf8)?.lowercased() }
     }
 }
