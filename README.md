@@ -10,8 +10,10 @@ The app is written in SwiftUI. [SwiftTerm](https://github.com/migueldeicaza/Swif
 
 Requires macOS 14 or later and the Swift toolchain included with Xcode.
 
+The normal development build is an executable:
+
 ```sh
-swift run
+swift build
 ```
 
 Build without launching the app:
@@ -19,6 +21,20 @@ Build without launching the app:
 ```sh
 swift build -c release
 ```
+
+To build and install the signed app bundle used for normal launches, run:
+
+```sh
+./scripts/build-app.sh "$HOME/Desktop/SimpleCmux.app"
+```
+
+The script keeps the app's bundle identifier and signs the bundle with the
+first valid Apple Development or Developer ID identity in the local keychain.
+You can select one explicitly with `SIMPLECMUX_SIGNING_IDENTITY`. macOS uses
+the signed app's designated requirement to remember privacy approvals, so use
+this script for updates instead of copying an unsigned executable into the
+app bundle. Privacy approvals still have to be granted once in System
+Settings; a build cannot grant or export them.
 
 The shell comes from the `SHELL` environment variable, falling back to `/bin/zsh`.
 
