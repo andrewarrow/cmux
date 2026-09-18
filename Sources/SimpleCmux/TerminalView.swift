@@ -120,6 +120,10 @@ final class SimpleTerminalView: LocalProcessTerminalView {
     var shouldFocus = false
     private var acceptsFileDrops = false
 
+    override func bell(source: Terminal) {
+        // Ignore BEL instead of playing the default system beep.
+    }
+
     func setAcceptsFileDrops(_ acceptsFileDrops: Bool) {
         guard self.acceptsFileDrops != acceptsFileDrops else { return }
         self.acceptsFileDrops = acceptsFileDrops
