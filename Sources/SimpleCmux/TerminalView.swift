@@ -73,6 +73,7 @@ struct TerminalView: NSViewRepresentable {
     func makeNSView(context: Context) -> SimpleTerminalView {
         let terminal = SimpleTerminalView(frame: .zero)
         terminal.shouldFocus = isActive
+        terminal.isHidden = !isActive
         terminal.setAcceptsFileDrops(isActive)
         let config = Self.userConfig
         let fontSize = config.fontSize ?? 13
@@ -106,6 +107,7 @@ struct TerminalView: NSViewRepresentable {
 
     func updateNSView(_ nsView: SimpleTerminalView, context: Context) {
         nsView.shouldFocus = isActive
+        nsView.isHidden = !isActive
         nsView.setAcceptsFileDrops(isActive)
         nsView.focusIfNeeded()
     }
