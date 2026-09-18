@@ -9,7 +9,7 @@ let package = Package(
         .executable(name: "simple", targets: ["SimpleCmux"])
     ],
     dependencies: [
-        .package(url: "https://github.com/migueldeicaza/SwiftTerm.git", exact: "1.11.2")
+        .package(url: "https://github.com/migueldeicaza/SwiftTerm.git", exact: "1.14.0")
     ],
     targets: [
         .executableTarget(
