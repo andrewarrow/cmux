@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 @main
@@ -11,6 +12,18 @@ struct SimpleCmuxApp: App {
         }
         .defaultSize(width: 1_000, height: 650)
         .commands {
+            CommandGroup(replacing: .appInfo) {
+                Button(String(localized: "about.title", defaultValue: "About SimpleCmux")) {
+                    let quote = String(
+                        localized: "about.quote",
+                        defaultValue: "“Perfection is achieved, not when there is nothing more to add, but when there is nothing left to take away.” — Antoine de Saint-Exupéry"
+                    )
+                    NSApp.orderFrontStandardAboutPanel(options: [
+                        .credits: NSAttributedString(string: quote)
+                    ])
+                }
+            }
+
             CommandGroup(after: .newItem) {
                 Button(String(localized: "command.newTab", defaultValue: "New Tab")) {
                     store.addTab()
