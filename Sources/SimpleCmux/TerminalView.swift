@@ -22,13 +22,23 @@ struct TerminalView: NSViewRepresentable {
 
         func startTrackingDirectory(of terminal: SimpleTerminalView) {
             self.terminal = terminal
-            refreshDirectory()
+            refreshState()
 
-            let timer = Timer(timeInterval: 0.5, repeats: true) { [weak self] _ in
+            let timer = Timer(timeInterval: 0.25, repeats: true) { [weak self] _ in
                 self?.refreshState()
             }
             RunLoop.main.add(timer, forMode: .common)
             directoryTimer = timer
+        }
+
+        func promptSubmitted() {
+            guard let process = ProcessTree.codexProcess(
+                below: terminal?.process.shellPid ?? 0
+            ) else {
+                return
+            }
+            codexActivityMonitor.notePromptSubmitted(for: process)
+            tab.updateCodexRunning(true)
         }
 
         func stopTrackingDirectory() {
@@ -87,6 +97,9 @@ struct TerminalView: NSViewRepresentable {
             terminal?.currentWorkingDirectory() ?? tab?.currentDirectory
         }
         terminal.startProcess(executable: shell, args: ["-l", "-i"], currentDirectory: workingDirectory)
+        terminal.onPromptSubmitted = { [weak coordinator = context.coordinator] in
+            coordinator?.promptSubmitted()
+        }
         context.coordinator.startTrackingDirectory(of: terminal)
         return terminal
     }
@@ -118,6 +131,7 @@ struct TerminalView: NSViewRepresentable {
 
 final class SimpleTerminalView: LocalProcessTerminalView {
     var shouldFocus = false
+    var onPromptSubmitted: (() -> Void)?
     private var acceptsFileDrops = false
 
     override func bell(source: Terminal) {
@@ -176,6 +190,13 @@ final class SimpleTerminalView: LocalProcessTerminalView {
         return super.performKeyEquivalent(with: event)
     }
 
+    override func send(source: SwiftTerm.TerminalView, data: ArraySlice<UInt8>) {
+        if data.contains(0x0D) || data.contains(0x0A) {
+            onPromptSubmitted?()
+        }
+        super.send(source: source, data: data)
+    }
+
     func clearScreenAndScrollback() {
         // ED 3 removes scrollback, ED 2 clears the visible screen, and CUP H
         // returns the cursor to the top-left without sending anything to the shell.
@@ -228,6 +249,15 @@ private final class CodexActivityMonitor {
     private var transcriptOffset: UInt64 = 0
     private var pendingTranscriptData = Data()
     private var promptIsRunning = false
+    private var promptSubmissionDeadline: Date?
+
+    func notePromptSubmitted(for process: ProcessTree.CodexProcess) {
+        if processID != process.id || processStartedAt != process.startedAt {
+            reset(for: process)
+        }
+        promptIsRunning = true
+        promptSubmissionDeadline = Date().addingTimeInterval(5)
+    }
 
     func isPromptRunning(below shellPID: pid_t) -> Bool {
         guard let process = ProcessTree.codexProcess(below: shellPID) else {
@@ -242,9 +272,18 @@ private final class CodexActivityMonitor {
         if transcriptURL == nil {
             transcriptURL = findTranscript(for: process)
         }
-        guard let transcriptURL else { return false }
+        guard let transcriptURL else {
+            if let deadline = promptSubmissionDeadline, deadline >= Date() {
+                return promptIsRunning
+            }
+            return false
+        }
 
         readNewEvents(from: transcriptURL)
+        if let deadline = promptSubmissionDeadline, deadline < Date() {
+            promptSubmissionDeadline = nil
+            promptIsRunning = false
+        }
         return promptIsRunning
     }
 
@@ -255,6 +294,7 @@ private final class CodexActivityMonitor {
         transcriptOffset = 0
         pendingTranscriptData.removeAll(keepingCapacity: true)
         promptIsRunning = false
+        promptSubmissionDeadline = nil
     }
 
     private func findTranscript(for process: ProcessTree.CodexProcess) -> URL? {
@@ -374,9 +414,12 @@ private final class CodexActivityMonitor {
             }
             switch eventType {
             case "task_started":
+                promptSubmissionDeadline = nil
                 promptIsRunning = true
             case "task_complete", "turn_aborted":
-                promptIsRunning = false
+                if promptSubmissionDeadline == nil {
+                    promptIsRunning = false
+                }
             default:
                 break
             }
