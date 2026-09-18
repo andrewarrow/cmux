@@ -8,6 +8,7 @@ final class TerminalTab: Identifiable, ObservableObject {
     @Published private(set) var currentDirectory: String?
     @Published private(set) var isCodexRunning = false
     var currentDirectoryProvider: (() -> String?)?
+    var codexActivityDidChange: ((Bool) -> Void)?
 
     var title: String {
         guard let currentDirectory else { return fallbackTitle }
@@ -45,6 +46,7 @@ final class TerminalTab: Identifiable, ObservableObject {
     func updateCodexRunning(_ isRunning: Bool) {
         guard isCodexRunning != isRunning else { return }
         isCodexRunning = isRunning
+        codexActivityDidChange?(isRunning)
     }
 }
 
@@ -57,7 +59,6 @@ final class Workspace: Identifiable, ObservableObject {
 
     var didChange: (() -> Void)?
     private var firstTabDirectoryObservation: AnyCancellable?
-    private var tabActivityObservations: [TerminalTab.ID: AnyCancellable] = [:]
 
     var name: String {
         guard let currentDirectory = tabs.first?.currentDirectory else {
@@ -73,7 +74,7 @@ final class Workspace: Identifiable, ObservableObject {
         tabs = [firstTab]
         selectedTabID = firstTab.id
         observeFirstTabDirectory()
-        observeTabActivity()
+        connectTabActivityCallbacks()
     }
 
     fileprivate init(
@@ -89,7 +90,7 @@ final class Workspace: Identifiable, ObservableObject {
             ? selectedTabID
             : tabs[0].id
         observeFirstTabDirectory()
-        observeTabActivity()
+        connectTabActivityCallbacks()
     }
 
     @discardableResult
@@ -98,7 +99,7 @@ final class Workspace: Identifiable, ObservableObject {
         let tab = TerminalTab(number: tabs.count + 1, currentDirectory: currentDirectory)
         tabs.append(tab)
         selectedTabID = tab.id
-        observeTabActivity()
+        connectTabActivityCallbacks()
         didChange?()
         return tab
     }
@@ -125,11 +126,12 @@ final class Workspace: Identifiable, ObservableObject {
         }
 
         tabs.remove(at: index)
+        tab.codexActivityDidChange = nil
         if selectedTabID == tab.id {
             selectedTabID = tabs[min(index, tabs.count - 1)].id
         }
         observeFirstTabDirectory()
-        observeTabActivity()
+        connectTabActivityCallbacks()
         didChange?()
     }
 
@@ -141,26 +143,17 @@ final class Workspace: Identifiable, ObservableObject {
             }
     }
 
-    private func observeTabActivity() {
-        tabActivityObservations = Dictionary(uniqueKeysWithValues: tabs.map { tab in
-            let tabID = tab.id
-            return (tabID, tab.$isCodexRunning.sink { [weak self] isRunning in
-                self?.refreshCodexActivity(changing: tabID, to: isRunning)
-            })
-        })
+    private func connectTabActivityCallbacks() {
+        tabs.forEach { tab in
+            tab.codexActivityDidChange = { [weak self] _ in
+                self?.refreshCodexActivity()
+            }
+        }
         refreshCodexActivity()
     }
 
-    private func refreshCodexActivity(
-        changing changedTabID: TerminalTab.ID? = nil,
-        to changedValue: Bool? = nil
-    ) {
-        let isRunning = tabs.contains { tab in
-            if tab.id == changedTabID, let changedValue {
-                return changedValue
-            }
-            return tab.isCodexRunning
-        }
+    private func refreshCodexActivity() {
+        let isRunning = tabs.contains { $0.isCodexRunning }
         guard hasRunningCodex != isRunning else { return }
         hasRunningCodex = isRunning
     }
