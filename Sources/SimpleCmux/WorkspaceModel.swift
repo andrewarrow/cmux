@@ -143,15 +143,24 @@ final class Workspace: Identifiable, ObservableObject {
 
     private func observeTabActivity() {
         tabActivityObservations = Dictionary(uniqueKeysWithValues: tabs.map { tab in
-            (tab.id, tab.$isCodexRunning.sink { [weak self] _ in
-                self?.refreshCodexActivity()
+            let tabID = tab.id
+            return (tabID, tab.$isCodexRunning.sink { [weak self] isRunning in
+                self?.refreshCodexActivity(changing: tabID, to: isRunning)
             })
         })
         refreshCodexActivity()
     }
 
-    private func refreshCodexActivity() {
-        let isRunning = tabs.contains { $0.isCodexRunning }
+    private func refreshCodexActivity(
+        changing changedTabID: TerminalTab.ID? = nil,
+        to changedValue: Bool? = nil
+    ) {
+        let isRunning = tabs.contains { tab in
+            if tab.id == changedTabID, let changedValue {
+                return changedValue
+            }
+            return tab.isCodexRunning
+        }
         guard hasRunningCodex != isRunning else { return }
         hasRunningCodex = isRunning
     }
