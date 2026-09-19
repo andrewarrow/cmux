@@ -3,13 +3,27 @@ import SwiftUI
 
 struct ContentView: View {
     @EnvironmentObject private var store: WorkspaceStore
+    @State private var sidebarWidth: CGFloat = 220
+    @State private var sidebarWidthAtDragStart: CGFloat?
+
+    private let minimumSidebarWidth: CGFloat = 160
+    private let maximumSidebarWidth: CGFloat = 420
 
     var body: some View {
         HStack(spacing: 0) {
             WorkspaceSidebar()
-                .frame(width: 220)
+                .frame(width: sidebarWidth)
 
-            Divider()
+            SidebarResizeHandle { translation in
+                let startingWidth = sidebarWidthAtDragStart ?? sidebarWidth
+                sidebarWidthAtDragStart = startingWidth
+                sidebarWidth = min(
+                    max(startingWidth + translation, minimumSidebarWidth),
+                    maximumSidebarWidth
+                )
+            } onEnded: {
+                sidebarWidthAtDragStart = nil
+            }
 
             ZStack {
                 ForEach(store.workspaces) { workspace in
@@ -30,6 +44,40 @@ struct ContentView: View {
         .onDisappear {
             store.save()
         }
+    }
+}
+
+private struct SidebarResizeHandle: View {
+    let onChanged: (CGFloat) -> Void
+    let onEnded: () -> Void
+
+    var body: some View {
+        Rectangle()
+            .fill(.clear)
+            .frame(width: 8)
+            .contentShape(Rectangle())
+            .overlay {
+                Divider()
+            }
+            .onHover { isHovering in
+                if isHovering {
+                    NSCursor.resizeLeftRight.push()
+                } else {
+                    NSCursor.pop()
+                }
+            }
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { value in
+                        onChanged(value.translation.width)
+                    }
+                    .onEnded { _ in
+                        onEnded()
+                    }
+            )
+            .accessibilityElement()
+            .accessibilityLabel(String(localized: "sidebar.resize", defaultValue: "Resize sidebar"))
+            .accessibilityHint(String(localized: "sidebar.resizeHint", defaultValue: "Drag left or right to resize the sidebar"))
     }
 }
 
