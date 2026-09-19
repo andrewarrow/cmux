@@ -72,6 +72,9 @@ struct TerminalView: NSViewRepresentable {
 
     func makeNSView(context: Context) -> SimpleTerminalView {
         let terminal = SimpleTerminalView(frame: .zero)
+        // Keep the terminal's mouse gestures available for selecting and copying
+        // output, including while a full-screen app is streaming new text.
+        terminal.allowMouseReporting = false
         terminal.shouldFocus = isActive
         terminal.isHidden = !isActive
         terminal.setAcceptsFileDrops(isActive)
