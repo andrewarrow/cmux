@@ -97,7 +97,14 @@ struct TerminalView: NSViewRepresentable {
         tab.currentDirectoryProvider = { [weak terminal, weak tab] in
             terminal?.currentWorkingDirectory() ?? tab?.currentDirectory
         }
-        terminal.startProcess(executable: shell, args: ["-l", "-i"], currentDirectory: workingDirectory)
+        // SwiftUI creates the AppKit view at zero size before laying it out. Start
+        // the shell once the terminal has its real bounds so the PTY gets the
+        // same column count that SwiftTerm renders.
+        terminal.startProcessWhenReady(
+            executable: shell,
+            args: ["-l", "-i"],
+            currentDirectory: workingDirectory
+        )
         terminal.onPromptSubmitted = { [weak coordinator = context.coordinator] in
             coordinator?.promptSubmitted()
         }
@@ -109,6 +116,7 @@ struct TerminalView: NSViewRepresentable {
         nsView.shouldFocus = isActive
         nsView.isHidden = !isActive
         nsView.setAcceptsFileDrops(isActive)
+        nsView.startPendingProcessIfReady()
         nsView.focusIfNeeded()
     }
 
@@ -135,6 +143,34 @@ final class SimpleTerminalView: LocalProcessTerminalView {
     var shouldFocus = false
     var onPromptSubmitted: (() -> Void)?
     private var acceptsFileDrops = false
+    private var pendingProcessStart: (() -> Void)?
+
+    func startProcessWhenReady(
+        executable: String,
+        args: [String],
+        currentDirectory: String
+    ) {
+        pendingProcessStart = { [weak self] in
+            self?.startProcess(
+                executable: executable,
+                args: args,
+                currentDirectory: currentDirectory
+            )
+        }
+        startPendingProcessIfReady()
+    }
+
+    func startPendingProcessIfReady() {
+        guard !process.running,
+              let pendingProcessStart,
+              window != nil,
+              bounds.width > 0,
+              bounds.height > 0 else {
+            return
+        }
+        self.pendingProcessStart = nil
+        pendingProcessStart()
+    }
 
     override func bell(source: Terminal) {
         // Ignore BEL instead of playing the default system beep.
@@ -232,7 +268,13 @@ final class SimpleTerminalView: LocalProcessTerminalView {
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
+        startPendingProcessIfReady()
         focusIfNeeded()
+    }
+
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        startPendingProcessIfReady()
     }
 
     func focusIfNeeded() {
