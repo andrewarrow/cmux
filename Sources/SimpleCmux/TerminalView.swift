@@ -88,7 +88,11 @@ struct TerminalView: NSViewRepresentable {
         } else {
             terminal.font = .monospacedSystemFont(ofSize: fontSize, weight: .regular)
         }
-        terminal.changeScrollback(Self.scrollbackLines)
+        // Configure the underlying emulator before the shell starts. Using
+        // TerminalOptions plus setup(isReset:) keeps this compatible with
+        // SwiftTerm releases that do not expose the view-level scrollback API.
+        terminal.terminal.options.scrollback = Self.scrollbackLines
+        terminal.terminal.setup(isReset: true)
         terminal.nativeBackgroundColor = config.backgroundColor
             ?? NSColor(calibratedWhite: 0.08, alpha: 1)
         terminal.nativeForegroundColor = config.foregroundColor
@@ -150,6 +154,7 @@ final class SimpleTerminalView: LocalProcessTerminalView {
     var onPromptSubmitted: (() -> Void)?
     private var acceptsFileDrops = false
     private var pendingProcessStart: (() -> Void)?
+    private var optionClickMonitor: Any?
 
     func startProcessWhenReady(
         executable: String,
@@ -245,19 +250,6 @@ final class SimpleTerminalView: LocalProcessTerminalView {
             return true
         }
         return super.performKeyEquivalent(with: event)
-    }
-
-    override func mouseDown(with event: NSEvent) {
-        let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-        if event.clickCount == 1,
-           modifiers.contains(.option),
-           !modifiers.contains(.shift),
-           terminal.mouseMode == .off,
-           !terminal.isCurrentBufferAlternate,
-           moveCursorToOptionClick(event) {
-            return
-        }
-        super.mouseDown(with: event)
     }
 
     override func send(source: SwiftTerm.TerminalView, data: ArraySlice<UInt8>) {
@@ -362,6 +354,7 @@ final class SimpleTerminalView: LocalProcessTerminalView {
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
+        installOptionClickMonitor()
         startPendingProcessIfReady()
         focusIfNeeded()
     }
@@ -376,6 +369,32 @@ final class SimpleTerminalView: LocalProcessTerminalView {
         DispatchQueue.main.async { [weak self, weak window] in
             guard let self, let window, self.shouldFocus else { return }
             window.makeFirstResponder(self)
+        }
+    }
+
+    private func installOptionClickMonitor() {
+        if let optionClickMonitor {
+            NSEvent.removeMonitor(optionClickMonitor)
+            self.optionClickMonitor = nil
+        }
+
+        guard window != nil else { return }
+        optionClickMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) {
+            [weak self] event in
+            guard let self,
+                  let window = self.window,
+                  event.window === window,
+                  !self.isHidden,
+                  self.bounds.contains(self.convert(event.locationInWindow, from: nil)) else {
+                return event
+            }
+            return self.moveCursorToOptionClick(event) ? nil : event
+        }
+    }
+
+    deinit {
+        if let optionClickMonitor {
+            NSEvent.removeMonitor(optionClickMonitor)
         }
     }
 }
