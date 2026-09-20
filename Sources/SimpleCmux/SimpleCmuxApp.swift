@@ -5,6 +5,13 @@ import SwiftUI
 struct SimpleCmuxApp: App {
     @StateObject private var store = WorkspaceStore()
 
+    init() {
+        // Terminal input should use macOS key-repeat events instead of the
+        // press-and-hold accent picker. This is app-scoped and keeps held Vim
+        // commands such as `x` repeating normally.
+        UserDefaults.standard.set(false, forKey: "ApplePressAndHoldEnabled")
+    }
+
     var body: some Scene {
         WindowGroup {
             ContentView()
