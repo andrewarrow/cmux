@@ -9,6 +9,7 @@ struct TerminalView: NSViewRepresentable {
     let isActive: Bool
 
     private static let userConfig = GhosttyUserConfig.load()
+    private static let scrollbackLines = 100_000
 
     final class Coordinator {
         let tab: TerminalTab
@@ -86,6 +87,7 @@ struct TerminalView: NSViewRepresentable {
         } else {
             terminal.font = .monospacedSystemFont(ofSize: fontSize, weight: .regular)
         }
+        terminal.changeScrollback(Self.scrollbackLines)
         terminal.nativeBackgroundColor = config.backgroundColor
             ?? NSColor(calibratedWhite: 0.08, alpha: 1)
         terminal.nativeForegroundColor = config.foregroundColor
@@ -225,7 +227,7 @@ final class SimpleTerminalView: LocalProcessTerminalView {
         let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         if modifiers == .command,
            event.charactersIgnoringModifiers?.lowercased() == "k" {
-            clearScreenAndScrollback()
+            clearToStart()
             return true
         }
         return super.performKeyEquivalent(with: event)
@@ -238,10 +240,23 @@ final class SimpleTerminalView: LocalProcessTerminalView {
         super.send(source: source, data: data)
     }
 
-    func clearScreenAndScrollback() {
-        // ED 3 removes scrollback, ED 2 clears the visible screen, and CUP H
-        // returns the cursor to the top-left without sending anything to the shell.
-        terminal.feed(text: "\u{1B}[3J\u{1B}[2J\u{1B}[H")
+    func clearToStart() {
+        // Terminal.app's Cmd-K clears the visible output and scrollback while
+        // leaving the active prompt/current command in place. Capture the
+        // cursor row and its text before clearing, then restore that line and
+        // the cursor without sending anything to the shell.
+        let cursorRow = terminal.buffer.y
+        let cursorColumn = terminal.buffer.x
+        let currentLine = terminal.getText(
+            start: Position(col: 0, row: cursorRow),
+            end: Position(col: terminal.cols - 1, row: cursorRow)
+        )
+
+        terminal.feed(text: "\u{1B}[3J\u{1B}[2J")
+
+        let row = cursorRow + 1
+        let column = cursorColumn + 1
+        terminal.feed(text: "\u{1B}[\(row);1H\(currentLine)\u{1B}[\(row);\(column)H")
         focusIfNeeded()
     }
 

@@ -51,7 +51,7 @@ struct SimpleCmuxApp: App {
                 .keyboardShortcut("n", modifiers: [.command, .shift])
 
                 Button(String(localized: "command.clearTerminal", defaultValue: "Clear Terminal")) {
-                    (NSApp.keyWindow?.firstResponder as? SimpleTerminalView)?.clearScreenAndScrollback()
+                    (NSApp.keyWindow?.firstResponder as? SimpleTerminalView)?.clearToStart()
                 }
                 .keyboardShortcut("k", modifiers: .command)
             }
