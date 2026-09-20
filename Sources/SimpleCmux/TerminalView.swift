@@ -1,4 +1,5 @@
 import AppKit
+import Carbon.HIToolbox
 import Darwin
 import Foundation
 import SwiftTerm
@@ -73,9 +74,9 @@ struct TerminalView: NSViewRepresentable {
 
     func makeNSView(context: Context) -> SimpleTerminalView {
         let terminal = SimpleTerminalView(frame: .zero)
-        // Keep the terminal's mouse gestures available for selecting and copying
-        // output, including while a full-screen app is streaming new text.
-        terminal.allowMouseReporting = false
+        // Let full-screen terminal programs receive mouse events. SwiftTerm
+        // keeps Shift as the selection override, matching Terminal.app.
+        terminal.allowMouseReporting = true
         terminal.shouldFocus = isActive
         terminal.isHidden = !isActive
         terminal.setAcceptsFileDrops(isActive)
@@ -226,11 +227,37 @@ final class SimpleTerminalView: LocalProcessTerminalView {
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
         let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         if modifiers == .command,
+           !terminal.isCurrentBufferAlternate {
+            switch event.keyCode {
+            case UInt16(kVK_Home):
+                scroll(toPosition: 0)
+                return true
+            case UInt16(kVK_End):
+                scroll(toPosition: 1)
+                return true
+            default:
+                break
+            }
+        }
+        if modifiers == .command,
            event.charactersIgnoringModifiers?.lowercased() == "k" {
             clearToStart()
             return true
         }
         return super.performKeyEquivalent(with: event)
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        if event.clickCount == 1,
+           modifiers.contains(.option),
+           !modifiers.contains(.shift),
+           terminal.mouseMode == .off,
+           !terminal.isCurrentBufferAlternate,
+           moveCursorToOptionClick(event) {
+            return
+        }
+        super.mouseDown(with: event)
     }
 
     override func send(source: SwiftTerm.TerminalView, data: ArraySlice<UInt8>) {
@@ -258,6 +285,55 @@ final class SimpleTerminalView: LocalProcessTerminalView {
         let column = cursorColumn + 1
         terminal.feed(text: "\u{1B}[\(row);1H\(currentLine)\u{1B}[\(row);\(column)H")
         focusIfNeeded()
+    }
+
+    func copyAllText() {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(allTerminalText(), forType: .string)
+    }
+
+    func exportText() {
+        let text = allTerminalText()
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.plainText]
+        panel.canCreateDirectories = true
+        panel.nameFieldStringValue = "terminal.txt"
+        panel.begin { response in
+            guard response == .OK, let url = panel.url else { return }
+            do {
+                try text.write(to: url, atomically: true, encoding: .utf8)
+            } catch {
+                NSSound.beep()
+            }
+        }
+    }
+
+    private func allTerminalText() -> String {
+        String(decoding: terminal.getBufferAsData(kind: .normal), as: UTF8.self)
+    }
+
+    private func moveCursorToOptionClick(_ event: NSEvent) -> Bool {
+        guard scrollPosition == 0 else { return false }
+
+        let point = convert(event.locationInWindow, from: nil)
+        let cellWidth = max(font.maximumAdvancement.width, 1)
+        let cellHeight = max(caretFrame.height, 1)
+        let clickedRow = Int((bounds.height - point.y) / cellHeight)
+        guard clickedRow == terminal.buffer.y else { return false }
+
+        let targetColumn = min(max(Int(point.x / cellWidth), 0), terminal.cols)
+        let currentColumn = min(max(terminal.buffer.x, 0), terminal.cols)
+        let distance = targetColumn - currentColumn
+        guard distance != 0 else { return true }
+
+        let sequence = distance < 0
+            ? EscapeSequences.moveLeftNormal
+            : EscapeSequences.moveRightNormal
+        for _ in 0..<abs(distance) {
+            send(data: sequence[...])
+        }
+        return true
     }
 
     private func fileURLs(from draggingInfo: NSDraggingInfo) -> [URL] {

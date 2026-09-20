@@ -54,6 +54,15 @@ struct SimpleCmuxApp: App {
                     (NSApp.keyWindow?.firstResponder as? SimpleTerminalView)?.clearToStart()
                 }
                 .keyboardShortcut("k", modifiers: .command)
+
+                Button(String(localized: "command.copyAll", defaultValue: "Copy All")) {
+                    (NSApp.keyWindow?.firstResponder as? SimpleTerminalView)?.copyAllText()
+                }
+
+                Button(String(localized: "command.exportText", defaultValue: "Export Text…")) {
+                    (NSApp.keyWindow?.firstResponder as? SimpleTerminalView)?.exportText()
+                }
+                .keyboardShortcut("s", modifiers: .command)
             }
         }
     }
