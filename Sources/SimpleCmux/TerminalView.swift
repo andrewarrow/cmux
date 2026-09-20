@@ -260,22 +260,27 @@ final class SimpleTerminalView: LocalProcessTerminalView {
     }
 
     func clearToStart() {
-        // Terminal.app's Cmd-K clears the visible output and scrollback while
-        // leaving the active prompt/current command in place. Capture the
-        // cursor row and its text before clearing, then restore that line and
-        // the cursor without sending anything to the shell.
+        selectNone()
+
+        if terminal.isCurrentBufferAlternate {
+            terminal.feed(text: "\u{1B}[2J\u{1B}[H")
+            focusIfNeeded()
+            return
+        }
+
+        // Move the cursor row to the top before deleting scrollback. SwiftTerm
+        // moves the existing cells, so the prompt, attributes, and command stay
+        // intact without replaying rendered text or writing anything to the PTY.
         let cursorRow = terminal.buffer.y
-        let cursorColumn = terminal.buffer.x
-        let currentLine = terminal.getText(
-            start: Position(col: 0, row: cursorRow),
-            end: Position(col: terminal.cols - 1, row: cursorRow)
-        )
-
-        terminal.feed(text: "\u{1B}[3J\u{1B}[2J")
-
-        let row = cursorRow + 1
-        let column = cursorColumn + 1
-        terminal.feed(text: "\u{1B}[\(row);1H\(currentLine)\u{1B}[\(row);\(column)H")
+        let cursorColumn = min(max(terminal.buffer.x, 0), terminal.cols - 1)
+        var sequence = ""
+        if cursorRow > 0 {
+            sequence += "\u{1B}[\(cursorRow)S"
+        }
+        sequence += "\u{1B}[3J"
+        sequence += "\u{1B}[1;\(cursorColumn + 1)H"
+        terminal.feed(text: sequence)
+        scroll(toPosition: 1)
         focusIfNeeded()
     }
 
