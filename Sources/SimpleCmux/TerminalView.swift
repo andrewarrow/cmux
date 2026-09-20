@@ -230,7 +230,9 @@ final class SimpleTerminalView: LocalProcessTerminalView {
     }
 
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
-        let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        let modifiers = event.modifierFlags.intersection([
+            .command, .option, .control, .shift
+        ])
         if modifiers == .command,
            !terminal.isCurrentBufferAlternate {
             switch event.keyCode {
@@ -307,7 +309,11 @@ final class SimpleTerminalView: LocalProcessTerminalView {
     }
 
     private func allTerminalText() -> String {
-        String(decoding: terminal.getBufferAsData(kind: .normal), as: UTF8.self)
+        guard terminal.cols > 0 else { return "" }
+        return terminal.getText(
+            start: Position(col: 0, row: 0),
+            end: Position(col: terminal.cols - 1, row: Int.max)
+        )
     }
 
     private func moveCursorToOptionClick(_ event: NSEvent) -> Bool {
@@ -316,7 +322,8 @@ final class SimpleTerminalView: LocalProcessTerminalView {
         ])
         guard event.clickCount == 1,
               modifiers == .option,
-              scrollPosition == 1 else {
+              !terminal.isCurrentBufferAlternate,
+              (!canScroll || scrollPosition == 1) else {
             return false
         }
 
