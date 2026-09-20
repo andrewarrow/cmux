@@ -311,7 +311,14 @@ final class SimpleTerminalView: LocalProcessTerminalView {
     }
 
     private func moveCursorToOptionClick(_ event: NSEvent) -> Bool {
-        guard scrollPosition == 0 else { return false }
+        let modifiers = event.modifierFlags.intersection([
+            .command, .option, .control, .shift
+        ])
+        guard event.clickCount == 1,
+              modifiers == .option,
+              scrollPosition == 1 else {
+            return false
+        }
 
         let point = convert(event.locationInWindow, from: nil)
         let cellWidth = max(font.maximumAdvancement.width, 1)
