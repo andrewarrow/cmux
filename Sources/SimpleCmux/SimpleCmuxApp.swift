@@ -58,16 +58,16 @@ struct SimpleCmuxApp: App {
                 .keyboardShortcut("n", modifiers: [.command, .shift])
 
                 Button(String(localized: "command.clearTerminal", defaultValue: "Clear Terminal")) {
-                    (NSApp.keyWindow?.firstResponder as? SimpleTerminalView)?.clearToStart()
+                    (NSApp.keyWindow?.firstResponder as? GhosttyTerminalView)?.clearToStart()
                 }
                 .keyboardShortcut("k", modifiers: .command)
 
                 Button(String(localized: "command.copyAll", defaultValue: "Copy All")) {
-                    (NSApp.keyWindow?.firstResponder as? SimpleTerminalView)?.copyAllText()
+                    (NSApp.keyWindow?.firstResponder as? GhosttyTerminalView)?.copyAllText()
                 }
 
                 Button(String(localized: "command.exportText", defaultValue: "Export Text…")) {
-                    (NSApp.keyWindow?.firstResponder as? SimpleTerminalView)?.exportText()
+                    (NSApp.keyWindow?.firstResponder as? GhosttyTerminalView)?.exportText()
                 }
                 .keyboardShortcut("s", modifiers: .command)
             }

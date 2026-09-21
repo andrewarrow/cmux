@@ -2,508 +2,8 @@ import AppKit
 import Carbon.HIToolbox
 import Darwin
 import Foundation
-import SwiftTerm
+import GhosttyKit
 import SwiftUI
-
-struct TerminalView: NSViewRepresentable {
-    let tab: TerminalTab
-    let isActive: Bool
-
-    private static let userConfig = GhosttyUserConfig.load()
-    private static let scrollbackLines = 100_000
-
-    final class Coordinator {
-        let tab: TerminalTab
-        private weak var terminal: SimpleTerminalView?
-        private var directoryTimer: Timer?
-        private let codexActivityMonitor = CodexActivityMonitor()
-
-        init(tab: TerminalTab) {
-            self.tab = tab
-        }
-
-        func startTrackingDirectory(of terminal: SimpleTerminalView) {
-            self.terminal = terminal
-            refreshState()
-
-            let timer = Timer(timeInterval: 0.25, repeats: true) { [weak self] _ in
-                self?.refreshState()
-            }
-            RunLoop.main.add(timer, forMode: .common)
-            directoryTimer = timer
-        }
-
-        func promptSubmitted() {
-            guard let process = ProcessTree.codexProcess(
-                below: terminal?.process.shellPid ?? 0
-            ) else {
-                return
-            }
-            codexActivityMonitor.notePromptSubmitted(for: process)
-            tab.updateCodexRunning(true)
-        }
-
-        func stopTrackingDirectory() {
-            directoryTimer?.invalidate()
-            directoryTimer = nil
-            terminal = nil
-        }
-
-        private func refreshDirectory() {
-            guard let directory = terminal?.currentWorkingDirectory() else { return }
-            tab.updateCurrentDirectory(directory)
-        }
-
-        private func refreshState() {
-            refreshDirectory()
-            tab.updateCodexRunning(
-                codexActivityMonitor.isPromptRunning(
-                    below: terminal?.process.shellPid ?? 0
-                )
-            )
-        }
-
-        deinit {
-            directoryTimer?.invalidate()
-        }
-    }
-
-    func makeCoordinator() -> Coordinator {
-        Coordinator(tab: tab)
-    }
-
-    func makeNSView(context: Context) -> SimpleTerminalView {
-        let terminal = SimpleTerminalView(frame: .zero)
-        // Let full-screen terminal programs receive mouse events. SwiftTerm
-        // keeps Shift as the selection override, matching Terminal.app.
-        terminal.allowMouseReporting = true
-        terminal.shouldFocus = isActive
-        terminal.isHidden = !isActive
-        terminal.setAcceptsFileDrops(isActive)
-        let config = Self.userConfig
-        let fontSize = config.fontSize ?? 13
-        if let fontFamily = config.fontFamily,
-           let configuredFont = NSFont(name: fontFamily, size: fontSize) {
-            terminal.font = configuredFont
-        } else {
-            terminal.font = .monospacedSystemFont(ofSize: fontSize, weight: .regular)
-        }
-        // Configure the underlying emulator before the shell starts. Using
-        // TerminalOptions plus setup(isReset:) keeps this compatible with
-        // SwiftTerm releases that do not expose the view-level scrollback API.
-        terminal.terminal.options.scrollback = Self.scrollbackLines
-        terminal.terminal.setup(isReset: true)
-        terminal.nativeBackgroundColor = config.backgroundColor
-            ?? NSColor(calibratedWhite: 0.08, alpha: 1)
-        terminal.nativeForegroundColor = config.foregroundColor
-            ?? NSColor(calibratedWhite: 0.92, alpha: 1)
-
-        let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
-        // A login, interactive shell attached to the PTY loads the user's normal
-        // startup files, including ~/.zshrc for the default macOS zsh shell.
-        let workingDirectory = existingDirectory(at: tab.currentDirectory)
-            ?? config.resolvedWorkingDirectory()
-        tab.updateCurrentDirectory(workingDirectory)
-        tab.currentDirectoryProvider = { [weak terminal, weak tab] in
-            terminal?.currentWorkingDirectory() ?? tab?.currentDirectory
-        }
-        // SwiftUI creates the AppKit view at zero size before laying it out. Start
-        // the shell once the terminal has its real bounds so the PTY gets the
-        // same column count that SwiftTerm renders.
-        terminal.startProcessWhenReady(
-            executable: shell,
-            args: ["-l", "-i"],
-            currentDirectory: workingDirectory
-        )
-        terminal.onPromptSubmitted = { [weak coordinator = context.coordinator] in
-            coordinator?.promptSubmitted()
-        }
-        context.coordinator.startTrackingDirectory(of: terminal)
-        return terminal
-    }
-
-    func updateNSView(_ nsView: SimpleTerminalView, context: Context) {
-        nsView.shouldFocus = isActive
-        nsView.isHidden = !isActive
-        nsView.setAcceptsFileDrops(isActive)
-        nsView.startPendingProcessIfReady()
-        nsView.focusIfNeeded()
-    }
-
-    static func dismantleNSView(_ nsView: SimpleTerminalView, coordinator: Coordinator) {
-        coordinator.tab.updateCurrentDirectory(
-            nsView.currentWorkingDirectory() ?? coordinator.tab.currentDirectory
-        )
-        coordinator.stopTrackingDirectory()
-        nsView.terminate()
-    }
-
-    private func existingDirectory(at path: String?) -> String? {
-        guard let path else { return nil }
-        var isDirectory = ObjCBool(false)
-        guard FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory),
-              isDirectory.boolValue else {
-            return nil
-        }
-        return path
-    }
-}
-
-final class SimpleTerminalView: LocalProcessTerminalView {
-    private enum HostOutputState {
-        case ground
-        case escape
-        case controlSequence
-        case controlString
-        case controlStringEscape
-    }
-
-    var shouldFocus = false
-    var onPromptSubmitted: (() -> Void)?
-    private var acceptsFileDrops = false
-    private var pendingProcessStart: (() -> Void)?
-    private var optionClickMonitor: Any?
-    private var hostOutputState = HostOutputState.ground
-
-    func startProcessWhenReady(
-        executable: String,
-        args: [String],
-        currentDirectory: String
-    ) {
-        pendingProcessStart = { [weak self] in
-            self?.startProcess(
-                executable: executable,
-                args: args,
-                currentDirectory: currentDirectory
-            )
-        }
-        startPendingProcessIfReady()
-    }
-
-    func startPendingProcessIfReady() {
-        guard !process.running,
-              let pendingProcessStart,
-              window != nil,
-              bounds.width > 0,
-              bounds.height > 0 else {
-            return
-        }
-        self.pendingProcessStart = nil
-        pendingProcessStart()
-    }
-
-    override func bell(source: Terminal) {
-        // Ignore BEL instead of playing the default system beep.
-    }
-
-    override func dataReceived(slice: ArraySlice<UInt8>) {
-        var segmentStart = slice.startIndex
-
-        for index in slice.indices {
-            guard hostByteClearsPendingWrap(slice[index]) else { continue }
-
-            // SwiftTerm 1.14 leaves buffer.x one column beyond the grid after
-            // filling the rightmost cell. CUU and CUB then move from that
-            // phantom column instead of first clearing pending-wrap state.
-            // zsh's line editor uses both while redrawing wrapped input, which
-            // otherwise makes the command jump and overwrite the bottom row.
-            if segmentStart < index {
-                super.dataReceived(slice: slice[segmentStart..<index])
-            }
-            if terminal.cols > 0, terminal.buffer.x >= terminal.cols {
-                terminal.buffer.x = terminal.cols - 1
-            }
-
-            let nextIndex = slice.index(after: index)
-            super.dataReceived(slice: slice[index..<nextIndex])
-            segmentStart = nextIndex
-        }
-
-        if segmentStart < slice.endIndex {
-            super.dataReceived(slice: slice[segmentStart..<slice.endIndex])
-        }
-    }
-
-    private func hostByteClearsPendingWrap(_ byte: UInt8) -> Bool {
-        switch hostOutputState {
-        case .ground:
-            switch byte {
-            case 0x1B:
-                hostOutputState = .escape
-            default:
-                break
-            }
-
-        case .escape:
-            switch byte {
-            case 0x1B:
-                break
-            case 0x5B: // [
-                hostOutputState = .controlSequence
-            case 0x50, 0x58, 0x5D, 0x5E, 0x5F: // P, X, ], ^, _
-                hostOutputState = .controlString
-            default:
-                hostOutputState = .ground
-            }
-
-        case .controlSequence:
-            if byte == 0x1B {
-                hostOutputState = .escape
-            } else if byte == 0x18 || byte == 0x1A {
-                hostOutputState = .ground
-            } else if (0x40...0x7E).contains(byte) {
-                hostOutputState = .ground
-                return byte == 0x41 || byte == 0x44 // CUU or CUB
-            }
-
-        case .controlString:
-            if byte == 0x07 {
-                hostOutputState = .ground
-            } else if byte == 0x1B {
-                hostOutputState = .controlStringEscape
-            }
-
-        case .controlStringEscape:
-            if byte == 0x5C { // ST
-                hostOutputState = .ground
-            } else if byte != 0x1B {
-                hostOutputState = .controlString
-            }
-        }
-
-        return false
-    }
-
-    func setAcceptsFileDrops(_ acceptsFileDrops: Bool) {
-        guard self.acceptsFileDrops != acceptsFileDrops else { return }
-        self.acceptsFileDrops = acceptsFileDrops
-
-        if acceptsFileDrops {
-            registerForDraggedTypes([.fileURL])
-        } else {
-            unregisterDraggedTypes()
-        }
-    }
-
-    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
-        fileURLs(from: sender).isEmpty ? [] : .copy
-    }
-
-    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
-        let urls = fileURLs(from: sender)
-        guard !urls.isEmpty else { return false }
-
-        let paths = urls.map { shellQuoted($0.path) }.joined(separator: " ") + " "
-        sendAsPaste(paths)
-        window?.makeFirstResponder(self)
-        return true
-    }
-
-    func currentWorkingDirectory() -> String? {
-        guard process.shellPid > 0 else { return nil }
-
-        var info = proc_vnodepathinfo()
-        let size = Int32(MemoryLayout<proc_vnodepathinfo>.size)
-        let result = withUnsafeMutablePointer(to: &info) { pointer in
-            proc_pidinfo(process.shellPid, PROC_PIDVNODEPATHINFO, 0, pointer, size)
-        }
-        guard result == size else { return nil }
-
-        return withUnsafePointer(to: &info.pvi_cdir.vip_path) { pointer in
-            pointer.withMemoryRebound(to: CChar.self, capacity: Int(MAXPATHLEN)) { path in
-                String(cString: path)
-            }
-        }
-    }
-
-    override func performKeyEquivalent(with event: NSEvent) -> Bool {
-        let modifiers = event.modifierFlags.intersection([
-            .command, .option, .control, .shift
-        ])
-        if modifiers == .command,
-           !terminal.isCurrentBufferAlternate {
-            switch event.keyCode {
-            case UInt16(kVK_Home):
-                scroll(toPosition: 0)
-                return true
-            case UInt16(kVK_End):
-                scroll(toPosition: 1)
-                return true
-            default:
-                break
-            }
-        }
-        if modifiers == .command,
-           event.charactersIgnoringModifiers?.lowercased() == "k" {
-            clearToStart()
-            return true
-        }
-        return super.performKeyEquivalent(with: event)
-    }
-
-    override func send(source: SwiftTerm.TerminalView, data: ArraySlice<UInt8>) {
-        if data.contains(0x0D) || data.contains(0x0A) {
-            onPromptSubmitted?()
-        }
-        super.send(source: source, data: data)
-    }
-
-    func clearToStart() {
-        selectNone()
-
-        if terminal.isCurrentBufferAlternate {
-            terminal.feed(text: "\u{1B}[2J\u{1B}[H")
-            focusIfNeeded()
-            return
-        }
-
-        // Move the cursor row to the top before deleting scrollback. SwiftTerm
-        // moves the existing cells, so the prompt, attributes, and command stay
-        // intact without replaying rendered text or writing anything to the PTY.
-        let cursorRow = terminal.buffer.y
-        let cursorColumn = min(max(terminal.buffer.x, 0), terminal.cols - 1)
-        var sequence = ""
-        if cursorRow > 0 {
-            sequence += "\u{1B}[\(cursorRow)S"
-        }
-        sequence += "\u{1B}[3J"
-        sequence += "\u{1B}[1;\(cursorColumn + 1)H"
-        terminal.feed(text: sequence)
-        scroll(toPosition: 1)
-        focusIfNeeded()
-    }
-
-    func copyAllText() {
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        pasteboard.setString(allTerminalText(), forType: .string)
-    }
-
-    func exportText() {
-        let text = allTerminalText()
-        let panel = NSSavePanel()
-        panel.allowedContentTypes = [.plainText]
-        panel.canCreateDirectories = true
-        panel.nameFieldStringValue = "terminal.txt"
-        panel.begin { response in
-            guard response == .OK, let url = panel.url else { return }
-            do {
-                try text.write(to: url, atomically: true, encoding: .utf8)
-            } catch {
-                NSSound.beep()
-            }
-        }
-    }
-
-    private func allTerminalText() -> String {
-        guard terminal.cols > 0 else { return "" }
-        return terminal.getText(
-            start: Position(col: 0, row: 0),
-            end: Position(col: terminal.cols - 1, row: Int.max)
-        )
-    }
-
-    private func moveCursorToOptionClick(_ event: NSEvent) -> Bool {
-        let modifiers = event.modifierFlags.intersection([
-            .command, .option, .control, .shift
-        ])
-        guard event.clickCount == 1,
-              modifiers == .option,
-              !terminal.isCurrentBufferAlternate,
-              (!canScroll || scrollPosition == 1) else {
-            return false
-        }
-
-        let point = convert(event.locationInWindow, from: nil)
-        let cellWidth = max(font.maximumAdvancement.width, 1)
-        let cellHeight = max(caretFrame.height, 1)
-        let clickedRow = Int((bounds.height - point.y) / cellHeight)
-        guard clickedRow == terminal.buffer.y else { return false }
-
-        let targetColumn = min(max(Int(point.x / cellWidth), 0), terminal.cols)
-        let currentColumn = min(max(terminal.buffer.x, 0), terminal.cols)
-        let distance = targetColumn - currentColumn
-        guard distance != 0 else { return true }
-
-        let sequence = distance < 0
-            ? EscapeSequences.moveLeftNormal
-            : EscapeSequences.moveRightNormal
-        for _ in 0..<abs(distance) {
-            send(data: sequence[...])
-        }
-        return true
-    }
-
-    private func fileURLs(from draggingInfo: NSDraggingInfo) -> [URL] {
-        let options: [NSPasteboard.ReadingOptionKey: Any] = [
-            .urlReadingFileURLsOnly: true
-        ]
-        return draggingInfo.draggingPasteboard.readObjects(
-            forClasses: [NSURL.self],
-            options: options
-        ) as? [URL] ?? []
-    }
-
-    private func shellQuoted(_ path: String) -> String {
-        "'" + path.replacingOccurrences(of: "'", with: "'\\''") + "'"
-    }
-
-    private func sendAsPaste(_ text: String) {
-        if terminal.bracketedPasteMode {
-            send(data: EscapeSequences.bracketedPasteStart[...])
-        }
-        send(txt: text)
-        if terminal.bracketedPasteMode {
-            send(data: EscapeSequences.bracketedPasteEnd[...])
-        }
-    }
-
-    override func viewDidMoveToWindow() {
-        super.viewDidMoveToWindow()
-        installOptionClickMonitor()
-        startPendingProcessIfReady()
-        focusIfNeeded()
-    }
-
-    override func setFrameSize(_ newSize: NSSize) {
-        super.setFrameSize(newSize)
-        startPendingProcessIfReady()
-    }
-
-    func focusIfNeeded() {
-        guard shouldFocus, let window else { return }
-        DispatchQueue.main.async { [weak self, weak window] in
-            guard let self, let window, self.shouldFocus else { return }
-            window.makeFirstResponder(self)
-        }
-    }
-
-    private func installOptionClickMonitor() {
-        if let optionClickMonitor {
-            NSEvent.removeMonitor(optionClickMonitor)
-            self.optionClickMonitor = nil
-        }
-
-        guard window != nil else { return }
-        optionClickMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) {
-            [weak self] event in
-            guard let self,
-                  let window = self.window,
-                  event.window === window,
-                  !self.isHidden,
-                  self.bounds.contains(self.convert(event.locationInWindow, from: nil)) else {
-                return event
-            }
-            return self.moveCursorToOptionClick(event) ? nil : event
-        }
-    }
-
-    deinit {
-        if let optionClickMonitor {
-            NSEvent.removeMonitor(optionClickMonitor)
-        }
-    }
-}
 
 private final class CodexActivityMonitor {
     private var processID: pid_t?
@@ -820,4 +320,453 @@ private enum ProcessTree {
             .split(separator: 0)
             .compactMap { String(bytes: $0, encoding: .utf8)?.lowercased() }
     }
+}
+
+/// The small branch keeps cmux's terminal boundary but uses the same embedded
+/// libghostty surface as the main branch. Ghostty owns the PTY, parser,
+/// renderer, selection model, key encoding, and resize/SIGWINCH behavior.
+@MainActor
+private final class GhosttyRuntime {
+    static let shared = GhosttyRuntime()
+
+    let app: ghostty_app_t
+    private var tickTimer: Timer?
+
+    private init() {
+        precondition(
+            ghostty_init(UInt(CommandLine.argc), CommandLine.unsafeArgv) == GHOSTTY_SUCCESS,
+            "Unable to initialize Ghostty"
+        )
+
+        guard let config = ghostty_config_new() else {
+            fatalError("Unable to create Ghostty configuration")
+        }
+        ghostty_config_load_default_files(config)
+        ghostty_config_finalize(config)
+
+        var runtime = ghostty_runtime_config_s(
+            userdata: nil,
+            supports_selection_clipboard: true,
+            wakeup_cb: { _ in },
+            action_cb: { _, _, _ in false },
+            read_clipboard_cb: { _, _, _ in false },
+            confirm_read_clipboard_cb: { _, _, _, _ in },
+            write_clipboard_cb: { _, _, _, _, _ in },
+            close_surface_cb: { _, _ in },
+            tmux_control_cb: nil
+        )
+        guard let app = ghostty_app_new(&runtime, config) else {
+            ghostty_config_free(config)
+            fatalError("Unable to create Ghostty application")
+        }
+        ghostty_config_free(config)
+        self.app = app
+        ghostty_app_set_focus(app, true)
+
+        let appAddress = UInt(bitPattern: app)
+        tickTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 60.0, repeats: true) { _ in
+            MainActor.assumeIsolated {
+                ghostty_app_tick(UnsafeMutableRawPointer(bitPattern: appAddress))
+            }
+        }
+    }
+
+    deinit {
+        tickTimer?.invalidate()
+        ghostty_app_free(app)
+    }
+}
+
+struct TerminalView: NSViewRepresentable {
+    let tab: TerminalTab
+    let isActive: Bool
+
+    private static let userConfig = GhosttyUserConfig.load()
+
+    final class Coordinator {
+        let tab: TerminalTab
+        private weak var terminal: GhosttyTerminalView?
+        private var directoryTimer: Timer?
+        private let codexActivityMonitor = CodexActivityMonitor()
+
+        init(tab: TerminalTab) { self.tab = tab }
+
+        func startTrackingDirectory(of terminal: GhosttyTerminalView) {
+            self.terminal = terminal
+            refreshState()
+            let timer = Timer(timeInterval: 0.25, repeats: true) { [weak self] _ in
+                self?.refreshState()
+            }
+            RunLoop.main.add(timer, forMode: .common)
+            directoryTimer = timer
+        }
+
+        func stopTrackingDirectory() {
+            directoryTimer?.invalidate()
+            directoryTimer = nil
+            terminal = nil
+        }
+
+        private func refreshState() {
+            if let directory = terminal?.currentWorkingDirectory() {
+                tab.updateCurrentDirectory(directory)
+            }
+            let shellPID = terminal?.foregroundProcessID ?? 0
+            tab.updateCodexRunning(codexActivityMonitor.isPromptRunning(below: shellPID))
+        }
+
+        deinit { directoryTimer?.invalidate() }
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator(tab: tab) }
+
+    func makeNSView(context: Context) -> GhosttyTerminalView {
+        let workingDirectory = existingDirectory(at: tab.currentDirectory)
+            ?? Self.userConfig.resolvedWorkingDirectory()
+        tab.updateCurrentDirectory(workingDirectory)
+        let terminal = GhosttyTerminalView(
+            workingDirectory: workingDirectory,
+            fontSize: Float(Self.userConfig.fontSize ?? 13)
+        )
+        terminal.setActive(isActive)
+        tab.currentDirectoryProvider = { [weak terminal, weak tab] in
+            terminal?.currentWorkingDirectory() ?? tab?.currentDirectory
+        }
+        context.coordinator.startTrackingDirectory(of: terminal)
+        return terminal
+    }
+
+    func updateNSView(_ nsView: GhosttyTerminalView, context: Context) {
+        nsView.setActive(isActive)
+        nsView.focusIfNeeded()
+        if isActive { nsView.setNeedsDisplay(nsView.bounds) }
+    }
+
+    static func dismantleNSView(_ nsView: GhosttyTerminalView, coordinator: Coordinator) {
+        coordinator.tab.updateCurrentDirectory(
+            nsView.currentWorkingDirectory() ?? coordinator.tab.currentDirectory
+        )
+        coordinator.stopTrackingDirectory()
+    }
+
+    private func existingDirectory(at path: String?) -> String? {
+        guard let path else { return nil }
+        var isDirectory = ObjCBool(false)
+        guard FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory),
+              isDirectory.boolValue else { return nil }
+        return path
+    }
+}
+
+final class GhosttyTerminalView: NSView, NSTextInputClient {
+    private var surface: ghostty_surface_t?
+    var shouldFocus = false
+
+    func setActive(_ active: Bool) {
+        shouldFocus = active
+        isHidden = !active
+        if let surface {
+            ghostty_surface_set_focus(surface, active)
+            ghostty_surface_set_occlusion(surface, !active)
+        }
+    }
+
+    init(workingDirectory: String, fontSize: Float) {
+        super.init(frame: .zero)
+        wantsLayer = true
+        layer = CALayer()
+        layer?.backgroundColor = NSColor.black.cgColor
+
+        let runtime = GhosttyRuntime.shared
+        var config = ghostty_surface_config_new()
+        config.userdata = Unmanaged.passUnretained(self).toOpaque()
+        config.platform_tag = GHOSTTY_PLATFORM_MACOS
+        config.platform = ghostty_platform_u(macos: ghostty_platform_macos_s(
+            nsview: Unmanaged.passUnretained(self).toOpaque()
+        ))
+        config.scale_factor = Double(NSScreen.main?.backingScaleFactor ?? 2)
+        config.font_size = fontSize
+        config.context = GHOSTTY_SURFACE_CONTEXT_TAB
+
+        self.surface = workingDirectory.withCString { directory in
+            config.working_directory = directory
+            return ghostty_surface_new(runtime.app, &config)
+        }
+        guard surface != nil else {
+            layer?.backgroundColor = NSColor(calibratedWhite: 0.08, alpha: 1).cgColor
+            return
+        }
+        ghostty_surface_set_focus(surface, true)
+        registerForDraggedTypes([.fileURL])
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    deinit {
+        if let surface { ghostty_surface_free(surface) }
+    }
+
+    var foregroundProcessID: pid_t {
+        guard let surface else { return 0 }
+        return pid_t(ghostty_surface_foreground_pid(surface))
+    }
+
+    func currentWorkingDirectory() -> String? {
+        let pid = foregroundProcessID
+        guard pid > 0 else { return nil }
+        var info = proc_vnodepathinfo()
+        let size = Int32(MemoryLayout<proc_vnodepathinfo>.size)
+        let result = withUnsafeMutablePointer(to: &info) {
+            proc_pidinfo(pid, PROC_PIDVNODEPATHINFO, 0, $0, size)
+        }
+        guard result == size else { return nil }
+        return withUnsafePointer(to: &info.pvi_cdir.vip_path) {
+            $0.withMemoryRebound(to: CChar.self, capacity: Int(MAXPATHLEN)) {
+                String(cString: $0)
+            }
+        }
+    }
+
+    func focusIfNeeded() {
+        guard shouldFocus, let window else { return }
+        DispatchQueue.main.async { [weak self, weak window] in
+            guard let self, let window, self.shouldFocus else { return }
+            window.makeFirstResponder(self)
+        }
+    }
+
+    override var acceptsFirstResponder: Bool { true }
+
+    override func becomeFirstResponder() -> Bool {
+        let result = super.becomeFirstResponder()
+        if result, let surface { ghostty_surface_set_focus(surface, true) }
+        return result
+    }
+
+    override func resignFirstResponder() -> Bool {
+        let result = super.resignFirstResponder()
+        if result, let surface { ghostty_surface_set_focus(surface, false) }
+        return result
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        updateSurfaceSize()
+        focusIfNeeded()
+    }
+
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        updateSurfaceSize()
+    }
+
+    override func viewDidChangeBackingProperties() {
+        super.viewDidChangeBackingProperties()
+        updateSurfaceSize()
+    }
+
+    private func updateSurfaceSize() {
+        guard let surface, bounds.width > 0, bounds.height > 0 else { return }
+        let backing = convertToBacking(bounds).size
+        let scale = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2
+        layer?.contentsScale = scale
+        ghostty_surface_set_content_scale(surface, scale, scale)
+        ghostty_surface_set_size(surface, UInt32(backing.width), UInt32(backing.height))
+    }
+
+    override func keyDown(with event: NSEvent) { sendKey(event, action: GHOSTTY_ACTION_PRESS) }
+
+    override func keyUp(with event: NSEvent) { sendKey(event, action: GHOSTTY_ACTION_RELEASE) }
+
+    private func sendKey(_ event: NSEvent, action: ghostty_input_action_e) {
+        guard let surface else { return }
+        var key = ghostty_input_key_s()
+        key.action = action
+        key.mods = ghosttyMods(event.modifierFlags)
+        key.keycode = UInt32(event.keyCode)
+        key.unshifted_codepoint = event.charactersIgnoringModifiers?.unicodeScalars.first?.value ?? 0
+        let characters = action == GHOSTTY_ACTION_RELEASE ? nil : event.characters
+        if let characters {
+            characters.withCString { key.text = $0; _ = ghostty_surface_key(surface, key) }
+        } else {
+            _ = ghostty_surface_key(surface, key)
+        }
+    }
+
+    private func ghosttyMods(_ flags: NSEvent.ModifierFlags) -> ghostty_input_mods_e {
+        var raw = UInt32(GHOSTTY_MODS_NONE.rawValue)
+        if flags.contains(.shift) { raw |= GHOSTTY_MODS_SHIFT.rawValue }
+        if flags.contains(.control) { raw |= GHOSTTY_MODS_CTRL.rawValue }
+        if flags.contains(.option) { raw |= GHOSTTY_MODS_ALT.rawValue }
+        if flags.contains(.command) { raw |= GHOSTTY_MODS_SUPER.rawValue }
+        if flags.contains(.capsLock) { raw |= GHOSTTY_MODS_CAPS.rawValue }
+        return ghostty_input_mods_e(raw)
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        guard let surface else { return }
+        ghostty_surface_set_focus(surface, true)
+        ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_PRESS, GHOSTTY_MOUSE_LEFT, ghosttyMods(event.modifierFlags))
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        guard let surface else { return }
+        ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_RELEASE, GHOSTTY_MOUSE_LEFT, ghosttyMods(event.modifierFlags))
+    }
+
+    override func rightMouseDown(with event: NSEvent) {
+        guard let surface else { return super.rightMouseDown(with: event) }
+        if !ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_PRESS, GHOSTTY_MOUSE_RIGHT, ghosttyMods(event.modifierFlags)) {
+            super.rightMouseDown(with: event)
+        }
+    }
+
+    override func rightMouseUp(with event: NSEvent) {
+        guard let surface else { return super.rightMouseUp(with: event) }
+        if !ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_RELEASE, GHOSTTY_MOUSE_RIGHT, ghosttyMods(event.modifierFlags)) {
+            super.rightMouseUp(with: event)
+        }
+    }
+
+    override func updateTrackingAreas() {
+        trackingAreas.forEach(removeTrackingArea)
+        addTrackingArea(NSTrackingArea(
+            rect: bounds,
+            options: [.activeAlways, .inVisibleRect, .mouseMoved, .mouseEnteredAndExited],
+            owner: self,
+            userInfo: nil
+        ))
+    }
+
+    override func mouseMoved(with event: NSEvent) { sendMousePosition(event) }
+    override func mouseDragged(with event: NSEvent) { sendMousePosition(event) }
+
+    private func sendMousePosition(_ event: NSEvent) {
+        guard let surface else { return }
+        let point = convert(event.locationInWindow, from: nil)
+        ghostty_surface_mouse_pos(
+            surface,
+            Double(point.x),
+            Double(bounds.height - point.y),
+            ghosttyMods(event.modifierFlags)
+        )
+    }
+
+    override func scrollWheel(with event: NSEvent) {
+        guard let surface else { return }
+        ghostty_surface_mouse_scroll(surface, event.scrollingDeltaX, event.scrollingDeltaY, Int32(event.phase.rawValue))
+    }
+
+    func clearToStart() {
+        guard let surface else { return }
+        "\u{0c}".withCString { ghostty_surface_text(surface, $0, 1) }
+    }
+
+    func copyAllText() {
+        guard let surface else { return }
+        var text = ghostty_text_s()
+        let size = ghostty_surface_size(surface)
+        let selection = ghostty_selection_s(
+            top_left: ghostty_point_s(tag: GHOSTTY_POINT_VIEWPORT, coord: GHOSTTY_POINT_COORD_TOP_LEFT, x: 0, y: 0),
+            bottom_right: ghostty_point_s(tag: GHOSTTY_POINT_VIEWPORT, coord: GHOSTTY_POINT_COORD_BOTTOM_RIGHT, x: UInt32(size.columns), y: UInt32(size.rows)),
+            rectangle: false
+        )
+        guard ghostty_surface_read_text(surface, selection, &text), let ptr = text.text else { return }
+        let value = String(data: Data(bytes: ptr, count: Int(text.text_len)), encoding: .utf8) ?? ""
+        ghostty_surface_free_text(surface, &text)
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(value, forType: .string)
+    }
+
+    func exportText() {
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.plainText]
+        panel.nameFieldStringValue = "terminal.txt"
+        panel.begin { [weak self] response in
+            guard response == .OK, let url = panel.url else { return }
+            var text = ""
+            if let surface = self?.surface {
+                var cText = ghostty_text_s()
+                let size = ghostty_surface_size(surface)
+                let selection = ghostty_selection_s(
+                    top_left: ghostty_point_s(tag: GHOSTTY_POINT_VIEWPORT, coord: GHOSTTY_POINT_COORD_TOP_LEFT, x: 0, y: 0),
+                    bottom_right: ghostty_point_s(tag: GHOSTTY_POINT_VIEWPORT, coord: GHOSTTY_POINT_COORD_BOTTOM_RIGHT, x: UInt32(size.columns), y: UInt32(size.rows)),
+                    rectangle: false
+                )
+                if ghostty_surface_read_text(surface, selection, &cText), let ptr = cText.text {
+                    text = String(data: Data(bytes: ptr, count: Int(cText.text_len)), encoding: .utf8) ?? ""
+                    ghostty_surface_free_text(surface, &cText)
+                }
+            }
+            try? text.write(to: url, atomically: true, encoding: .utf8)
+        }
+    }
+
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        let modifiers = event.modifierFlags.intersection([.command, .option, .control, .shift])
+        if modifiers == .command, let command = event.charactersIgnoringModifiers?.lowercased() {
+            switch command {
+            case "c":
+                return copySelectionIfPresent()
+            case "v":
+                pasteFromPasteboard()
+                return true
+            case "x":
+                return copySelectionIfPresent()
+            default:
+                break
+            }
+        }
+        if modifiers == .command, event.charactersIgnoringModifiers?.lowercased() == "k" {
+            clearToStart()
+            return true
+        }
+        return super.performKeyEquivalent(with: event)
+    }
+
+    private func copySelectionIfPresent() -> Bool {
+        guard let surface, ghostty_surface_has_selection(surface) else { return false }
+        var text = ghostty_text_s()
+        guard ghostty_surface_read_selection(surface, &text), let ptr = text.text else { return false }
+        let value = String(data: Data(bytes: ptr, count: Int(text.text_len)), encoding: .utf8) ?? ""
+        ghostty_surface_free_text(surface, &text)
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(value, forType: .string)
+        return true
+    }
+
+    private func pasteFromPasteboard() {
+        guard let surface, let value = NSPasteboard.general.string(forType: .string) else { return }
+        value.withCString { ghostty_surface_text(surface, $0, UInt(value.utf8.count)) }
+    }
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        sender.draggingPasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true])?.isEmpty == false ? .copy : []
+    }
+
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        guard let urls = sender.draggingPasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL], !urls.isEmpty else { return false }
+        let text = urls.map { "'" + $0.path.replacingOccurrences(of: "'", with: "'\\''") + "'" }.joined(separator: " ") + " "
+        guard let surface else { return false }
+        text.withCString { ghostty_surface_text(surface, $0, UInt(text.utf8.count)) }
+        window?.makeFirstResponder(self)
+        return true
+    }
+
+    // NSTextInputClient: direct key events above cover normal shell input;
+    // these methods keep IME and dead-key input AppKit-compatible.
+    func insertText(_ string: Any, replacementRange: NSRange) {
+        guard let text = string as? String, let surface else { return }
+        text.withCString { ghostty_surface_text_input(surface, $0, UInt(text.utf8.count)) }
+    }
+    func setMarkedText(_ string: Any, selectedRange: NSRange, replacementRange: NSRange) {}
+    func unmarkText() {}
+    func selectedRange() -> NSRange { NSRange(location: NSNotFound, length: 0) }
+    func markedRange() -> NSRange { NSRange(location: NSNotFound, length: 0) }
+    func hasMarkedText() -> Bool { false }
+    func validAttributesForMarkedText() -> [NSAttributedString.Key] { [] }
+    func attributedSubstring(forProposedRange range: NSRange, actualRange: NSRangePointer?) -> NSAttributedString? { nil }
+    func characterIndex(for point: NSPoint) -> Int { 0 }
+    func firstRect(forCharacterRange range: NSRange, actualRange: NSRangePointer?) -> NSRect { .zero }
+    override func doCommand(by selector: Selector) {}
 }

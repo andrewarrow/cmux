@@ -1,8 +1,8 @@
 import AppKit
 import Foundation
 
-/// The small, startup-only subset of Ghostty configuration that SwiftTerm can
-/// use directly. The file search order follows Ghostty's macOS defaults.
+/// The small, startup-only subset of Ghostty configuration used by the simple
+/// surface. The file search order follows Ghostty's macOS defaults.
 struct GhosttyUserConfig {
     private var values: [String: String] = [:]
 

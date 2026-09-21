@@ -16,6 +16,7 @@ fi
 
 print "Building ${PRODUCT_NAME} (${BUILD_CONFIGURATION})..."
 cd "${PROJECT_ROOT}"
+"${PROJECT_ROOT}/scripts/ensure-ghosttykit.sh"
 swift build -c "${BUILD_CONFIGURATION}" --product simple
 BIN_PATH="$(swift build -c "${BUILD_CONFIGURATION}" --product simple --show-bin-path)"
 

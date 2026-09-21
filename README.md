@@ -4,7 +4,7 @@ English | [Deutsch](README.de.md) | [Français](README.fr.md) | [العربية]
 
 A small macOS terminal app: one window, one local shell, no settings or accounts.
 
-The app is written in SwiftUI. [SwiftTerm](https://github.com/migueldeicaza/SwiftTerm) provides the terminal emulator and pseudo-terminal so interactive programs work as expected.
+The app is written in SwiftUI and embeds [libghostty](https://github.com/ghostty-org/ghostty), the same terminal surface engine used by cmux main. Ghostty owns the PTY, terminal parser, renderer, input encoding, and resize behavior.
 
 ## Build and run
 
@@ -13,12 +13,14 @@ Requires macOS 14 or later and the Swift toolchain included with Xcode.
 The normal development build is an executable:
 
 ```sh
+./scripts/ensure-ghosttykit.sh
 swift build
 ```
 
 Build without launching the app:
 
 ```sh
+./scripts/ensure-ghosttykit.sh
 swift build -c release
 ```
 
@@ -36,8 +38,11 @@ this script for updates instead of copying an unsigned executable into the
 app bundle. Privacy approvals still have to be granted once in System
 Settings; a build cannot grant or export them.
 
-The shell comes from the `SHELL` environment variable, falling back to `/bin/zsh`.
+The pinned GhosttyKit archive is downloaded once into `Vendor/` and verified by
+SHA-256. The shell comes from the `SHELL` environment variable, falling back to
+`/bin/zsh`.
 
 ## License
 
-This fork's code remains under [GPL-3.0-or-later](LICENSE). SwiftTerm is separately licensed under MIT; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+This fork's code remains under [GPL-3.0-or-later](LICENSE). Ghostty is also
+GPL-3.0-or-later; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
