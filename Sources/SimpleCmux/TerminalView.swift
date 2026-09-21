@@ -368,6 +368,7 @@ private final class GhosttyRuntime {
     static let shared = GhosttyRuntime()
 
     let app: ghostty_app_t
+    private let config: ghostty_config_t
     private let tickDriver = GhosttyTickDriver()
 
     private init() {
@@ -403,7 +404,7 @@ private final class GhosttyRuntime {
             ghostty_config_free(config)
             fatalError("Unable to create Ghostty application")
         }
-        ghostty_config_free(config)
+        self.config = config
         self.app = app
         ghostty_app_set_focus(app, true)
         tickDriver.install { [weak self] in
@@ -418,6 +419,7 @@ private final class GhosttyRuntime {
     deinit {
         tickDriver.clear()
         ghostty_app_free(app)
+        ghostty_config_free(config)
     }
 }
 
