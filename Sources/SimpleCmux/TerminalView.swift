@@ -697,7 +697,12 @@ final class GhosttyTerminalView: NSView, NSTextInputClient {
             (translationFlags ?? event.modifierFlags).subtracting([.control, .command])
         )
         key.keycode = UInt32(event.keyCode)
-        key.unshifted_codepoint = event.characters(byApplyingModifiers: [])?.unicodeScalars.first?.value ?? 0
+        // AppKit raises an exception if charactersByApplyingModifiers: is
+        // called for a modifier-only (flagsChanged) event. Modifier events
+        // do not have a key text/codepoint to send anyway.
+        if event.type != .flagsChanged {
+            key.unshifted_codepoint = event.characters(byApplyingModifiers: [])?.unicodeScalars.first?.value ?? 0
+        }
         key.composing = composing
         let characters = action == GHOSTTY_ACTION_RELEASE ? nil : (text ?? event.characters)
         if let characters {
