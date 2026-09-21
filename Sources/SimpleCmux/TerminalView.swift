@@ -3,6 +3,7 @@ import Carbon.HIToolbox
 import Darwin
 import Foundation
 import GhosttyKit
+import QuartzCore
 import SwiftUI
 
 private final class CodexActivityMonitor {
@@ -325,12 +326,49 @@ private enum ProcessTree {
 /// The small branch keeps cmux's terminal boundary but uses the same embedded
 /// libghostty surface as the main branch. Ghostty owns the PTY, parser,
 /// renderer, selection model, key encoding, and resize/SIGWINCH behavior.
+private final class GhosttyTickDriver {
+    private let lock = NSLock()
+    private var isScheduled = false
+    private var handler: (() -> Void)?
+
+    func install(_ handler: @escaping () -> Void) {
+        lock.lock()
+        self.handler = handler
+        lock.unlock()
+    }
+
+    func clear() {
+        lock.lock()
+        handler = nil
+        lock.unlock()
+    }
+
+    func wakeup() {
+        lock.lock()
+        guard !isScheduled else {
+            lock.unlock()
+            return
+        }
+        isScheduled = true
+        lock.unlock()
+
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.lock.lock()
+            self.isScheduled = false
+            let handler = self.handler
+            self.lock.unlock()
+            handler?()
+        }
+    }
+}
+
 @MainActor
 private final class GhosttyRuntime {
     static let shared = GhosttyRuntime()
 
     let app: ghostty_app_t
-    private var tickTimer: Timer?
+    private let tickDriver = GhosttyTickDriver()
 
     private init() {
         precondition(
@@ -345,9 +383,15 @@ private final class GhosttyRuntime {
         ghostty_config_finalize(config)
 
         var runtime = ghostty_runtime_config_s(
-            userdata: nil,
+            userdata: Unmanaged.passUnretained(tickDriver).toOpaque(),
             supports_selection_clipboard: true,
-            wakeup_cb: { _ in },
+            wakeup_cb: { userdata in
+                guard let userdata else { return }
+                Unmanaged<GhosttyTickDriver>
+                    .fromOpaque(userdata)
+                    .takeUnretainedValue()
+                    .wakeup()
+            },
             action_cb: { _, _, _ in false },
             read_clipboard_cb: { _, _, _ in false },
             confirm_read_clipboard_cb: { _, _, _, _ in },
@@ -362,17 +406,17 @@ private final class GhosttyRuntime {
         ghostty_config_free(config)
         self.app = app
         ghostty_app_set_focus(app, true)
-
-        let appAddress = UInt(bitPattern: app)
-        tickTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 60.0, repeats: true) { _ in
+        tickDriver.install { [weak self] in
+            guard let self else { return }
             MainActor.assumeIsolated {
-                ghostty_app_tick(UnsafeMutableRawPointer(bitPattern: appAddress))
+                ghostty_app_tick(self.app)
             }
         }
+        tickDriver.wakeup()
     }
 
     deinit {
-        tickTimer?.invalidate()
+        tickDriver.clear()
         ghostty_app_free(app)
     }
 }
@@ -463,6 +507,14 @@ final class GhosttyTerminalView: NSView, NSTextInputClient {
     private var keyTextAccumulator: [String]?
     var shouldFocus = false
 
+    override func makeBackingLayer() -> CALayer {
+        let metalLayer = CAMetalLayer()
+        metalLayer.pixelFormat = .bgra8Unorm
+        metalLayer.framebufferOnly = false
+        metalLayer.isOpaque = false
+        return metalLayer
+    }
+
     func setActive(_ active: Bool) {
         shouldFocus = active
         isHidden = !active
@@ -476,7 +528,6 @@ final class GhosttyTerminalView: NSView, NSTextInputClient {
     init(workingDirectory: String, fontSize: Float) {
         super.init(frame: .zero)
         wantsLayer = true
-        layer = CALayer()
         layer?.backgroundColor = NSColor.black.cgColor
 
         let runtime = GhosttyRuntime.shared
