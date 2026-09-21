@@ -24,6 +24,11 @@ Build without launching the app:
 swift build -c release
 ```
 
+To build from Xcode, run `./scripts/ensure-ghosttykit.sh` once from the
+repository root, then open `SimpleCmux.xcodeproj` and choose Product → Build.
+Xcode validates local xcframework references before running build phases, so
+the GhosttyKit archive must exist before opening/building the project.
+
 To build and install the signed app bundle used for normal launches, run:
 
 ```sh
