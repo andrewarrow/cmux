@@ -150,11 +150,20 @@ struct TerminalView: NSViewRepresentable {
 }
 
 final class SimpleTerminalView: LocalProcessTerminalView {
+    private enum HostOutputState {
+        case ground
+        case escape
+        case controlSequence
+        case controlString
+        case controlStringEscape
+    }
+
     var shouldFocus = false
     var onPromptSubmitted: (() -> Void)?
     private var acceptsFileDrops = false
     private var pendingProcessStart: (() -> Void)?
     private var optionClickMonitor: Any?
+    private var hostOutputState = HostOutputState.ground
 
     func startProcessWhenReady(
         executable: String,
@@ -185,6 +194,84 @@ final class SimpleTerminalView: LocalProcessTerminalView {
 
     override func bell(source: Terminal) {
         // Ignore BEL instead of playing the default system beep.
+    }
+
+    override func dataReceived(slice: ArraySlice<UInt8>) {
+        var segmentStart = slice.startIndex
+
+        for index in slice.indices {
+            guard hostByteClearsPendingWrap(slice[index]) else { continue }
+
+            // SwiftTerm 1.14 leaves buffer.x one column beyond the grid after
+            // filling the rightmost cell. CUU and CUB then move from that
+            // phantom column instead of first clearing pending-wrap state.
+            // zsh's line editor uses both while redrawing wrapped input, which
+            // otherwise makes the command jump and overwrite the bottom row.
+            if segmentStart < index {
+                super.dataReceived(slice: slice[segmentStart..<index])
+            }
+            if terminal.cols > 0, terminal.buffer.x >= terminal.cols {
+                terminal.buffer.x = terminal.cols - 1
+            }
+
+            let nextIndex = slice.index(after: index)
+            super.dataReceived(slice: slice[index..<nextIndex])
+            segmentStart = nextIndex
+        }
+
+        if segmentStart < slice.endIndex {
+            super.dataReceived(slice: slice[segmentStart..<slice.endIndex])
+        }
+    }
+
+    private func hostByteClearsPendingWrap(_ byte: UInt8) -> Bool {
+        switch hostOutputState {
+        case .ground:
+            switch byte {
+            case 0x1B:
+                hostOutputState = .escape
+            default:
+                break
+            }
+
+        case .escape:
+            switch byte {
+            case 0x1B:
+                break
+            case 0x5B: // [
+                hostOutputState = .controlSequence
+            case 0x50, 0x58, 0x5D, 0x5E, 0x5F: // P, X, ], ^, _
+                hostOutputState = .controlString
+            default:
+                hostOutputState = .ground
+            }
+
+        case .controlSequence:
+            if byte == 0x1B {
+                hostOutputState = .escape
+            } else if byte == 0x18 || byte == 0x1A {
+                hostOutputState = .ground
+            } else if (0x40...0x7E).contains(byte) {
+                hostOutputState = .ground
+                return byte == 0x41 || byte == 0x44 // CUU or CUB
+            }
+
+        case .controlString:
+            if byte == 0x07 {
+                hostOutputState = .ground
+            } else if byte == 0x1B {
+                hostOutputState = .controlStringEscape
+            }
+
+        case .controlStringEscape:
+            if byte == 0x5C { // ST
+                hostOutputState = .ground
+            } else if byte != 0x1B {
+                hostOutputState = .controlString
+            }
+        }
+
+        return false
     }
 
     func setAcceptsFileDrops(_ acceptsFileDrops: Bool) {
